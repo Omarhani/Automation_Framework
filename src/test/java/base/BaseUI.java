@@ -5,23 +5,23 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.edge.EdgeDriver;
 import org.openqa.selenium.edge.EdgeOptions;
-import org.openqa.selenium.firefox.FirefoxDriver;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Parameters;
+import org.testng.ITestResult;
+import org.testng.annotations.*;
 import pages.HomePage;
+import utils.ScreenRecorderUtil;
+import utils.UtilsTests;
 
-import java.io.FileNotFoundException;
+import java.lang.reflect.Method;
 
 import static reader.ReadDataFromJson.dataModel;
 
-public class BaseTests {
+public class BaseUI {
 
     protected WebDriver driver;
     ChromeOptions chromeOptions;
     EdgeOptions edgeOptions;
     protected HomePage homePage;
+    UtilsTests utilsTests;
 
     @Parameters("browser")
     public void setUpBrowser(String browser) {
@@ -44,12 +44,20 @@ public class BaseTests {
 
     @Parameters("browser")
     @BeforeClass
-    public void setUp(String browser) {
+    public void setUp(@Optional("chrome") String browser) {
         setUpBrowser(browser);
         driver.manage().window().maximize();
         homePage = new HomePage(driver);
     }
-
+    @AfterMethod
+    public void afterMethod(Method method, ITestResult result) throws Exception {
+        utilsTests = new UtilsTests(driver);
+        utilsTests.takeScreenShot(method);
+        ScreenRecorderUtil.stopRecord();
+        utilsTests.endsOfSteps();
+        utilsTests.setStatus(result);
+        utilsTests.addAttachment(method);
+    }
 
     @AfterClass
     public void tearDown() {
@@ -57,8 +65,22 @@ public class BaseTests {
     }
 
     @BeforeMethod
-    public void goHome() throws FileNotFoundException {
+    public void goHome(Method method) throws Exception {
+        utilsTests = new UtilsTests(driver);
+        ScreenRecorderUtil.startRecord(method.getName());
+        driver.get(dataModel().UI.BASE_URL);
+        utilsTests.createTestCaseInReport(method);
 
-        driver.get(dataModel().URL);
+    }
+
+    @BeforeSuite
+    public void beforeSuite(){
+        utilsTests = new UtilsTests(driver);
+        utilsTests.createReport();
+    }
+    @AfterSuite
+    public void afterSuite(){
+        utilsTests = new UtilsTests(driver);
+        utilsTests.flushReport();
     }
 }

@@ -1,0 +1,19 @@
+{
+  "URL": "https://the-internet.herokuapp.com/",
+  "Login": {
+    "ValidCredintails": {
+      "Username": "",
+      "Password": ""
+    },
+    "InvalidCredintails": {
+      "InvalidUsername": {
+        "Username": "",
+        "Password": ""
+      },
+      "InvalidPassword": {
+        "Username": "",
+        "Password": ""
+      }
+    }
+  }
+}

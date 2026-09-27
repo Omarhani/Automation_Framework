@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<suite name="Hybrid Smoke">
+    <!-- A hybrid suite: API, web and phone blocks in one run and ONE report. The usual shape:
+         1. make the data by API (keep its id in utils.RunContext)
+         2. use it on the web / the phone
+         3. clean up by API - always the last block -->
+    <parameter name="server" value="${serverType}"/>
+    <parameter name="browser" value="${browserType}"/>
+    <parameter name="healthPath" value=""/>
+
+    <test name="1. API answers">
+        <classes>
+            <class name="apis.health.HealthApiTests"/>
+        </classes>
+    </test>
+
+    <test name="2. Home page opens">
+        <groups><run><include name="Web"/></run></groups>
+        <classes>
+            <class name="ui.home.HomeTests"/>
+        </classes>
+    </test>
+
+    <!-- add a phone block the same way:
+    <test name="3. App opens">
+        <groups><run><include name="Mob"/></run></groups>
+        <classes><class name="mob.home.HomeTests"/></classes>
+    </test>
+    -->
+</suite>

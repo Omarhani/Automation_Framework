@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<suite name="Mobile Smoke">
+    <parameter name="server" value="${serverType}"/>
+
+    <!-- needs Appium 2 (uiautomator2 driver), adb and a phone / emulator; the app comes from MOBILE in the data file -->
+    <test name="App opens">
+        <groups><run><include name="Mob"/></run></groups>
+        <classes>
+            <class name="mob.home.HomeTests"/>
+        </classes>
+    </test>
+</suite>

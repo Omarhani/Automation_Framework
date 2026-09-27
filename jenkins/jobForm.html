@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Job</title>
+<!--
+  Run Job: a form for any Jenkins job, shown inside Jenkins (HTML Publisher target of a job, or /userContent/), so it
+  is served from the same origin and uses the signed-in session. The fields are built from the job's own parameter
+  definitions -> Run POSTs buildWithParameters (with the CSRF crumb) -> follows the queue item to the build -> streams
+  its console -> shows what the job reported as a result card. Recent runs lists the job's builds with their
+  parameters; the Undo button of a run starts a second job for it, and "Undone" is read back from that job's builds.
+
+  Configuration: the CONFIG object at the top of the script; every key can be overridden by the URL query:
+    ?job=/job/API/job/apiCreateBooking        the job to run ('' = the job whose HTML Publisher report serves this page)
+    &undoJob=/job/API/job/apiDeleteBooking    optional: the job that undoes one run (no Undo column without it)
+    &title=Create%20booking                   the heading and window title
+    &resultKey=id                             the @@result key the undo job gets as RESULT_ID
+
+  Result protocol: the job's console may hold lines "@@result {json}" - one JSON object per line, anywhere in the line
+  (a timestamp in front does not matter), e.g. from Java: System.out.println("@@result " + gson.toJson(map)).
+  All of them are merged in order, a later key winning, and shown as key / value, each with a Copy button. When the
+  merged object has the key CONFIG.resultKey, Undo starts CONFIG.undoJob with RESULT_ID = that value, plus the run's
+  own ENV parameter when it had one.
+
+  No library, no external resource: it also works when the agent machine is offline.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --surface-2: #f7f9fb;
+    --text: #1b2430;
+    --muted: #5f6b79;
+    --border: #d9dfe6;
+    --accent: #0b6e8f;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2f1f6;
+    --ok: #2f8f4e;
+    --ok-soft: #e4f4e9;
+    --bad: #c23a3a;
+    --bad-soft: #fbe7e7;
+    --warn: #b7791f;
+    --warn-soft: #fbf1dc;
+    --console-bg: #14191f;
+    --console-ink: #d7dee6;
+    --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 6px 20px rgba(20, 30, 40, .06);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0f1419;
+      --surface: #171d25;
+      --surface-2: #1d242d;
+      --text: #e6edf3;
+      --muted: #98a4b3;
+      --border: #2b3540;
+      --accent: #58b4d6;
+      --accent-ink: #0b1218;
+      --accent-soft: #163340;
+      --ok: #5fc27c;
+      --ok-soft: #173424;
+      --bad: #ef7373;
+      --bad-soft: #3a1c1c;
+      --warn: #e0b45b;
+      --warn-soft: #3a2f16;
+      --console-bg: #0b0f14;
+      --console-ink: #cfd8e1;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    padding-block: 24px 40px;
+    padding-inline: 20px;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 20px; }
+  header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+  header h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); }
+  header code { font-family: ui-monospace, Consolas, "SFMono-Regular", Menlo, monospace; font-size: 12.5px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 20px; align-items: start; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+  .card > .head { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .card > .head h2 { font-size: 15px; margin: 0; font-weight: 650; }
+  .card > .body { padding: 18px; }
+  form .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  @media (max-width: 560px) { form .row { grid-template-columns: 1fr; } }
+  .field { display: grid; gap: 5px; min-width: 0; align-content: start; }
+  .field.full, .row > .hint, .row > .error { grid-column: 1 / -1; }
+  label.name { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); overflow-wrap: anywhere; }
+  .hint { font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=password], select {
+    width: 100%; font: inherit; color: var(--text); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; min-width: 0;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible, .seg label:focus-within, .check:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .seg { display: flex; width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+  .seg label { flex: 1; text-align: center; padding: 8px 14px; cursor: pointer; user-select: none; border-right: 1px solid var(--border); overflow-wrap: anywhere; }
+  .seg label:last-child { border-right: 0; }
+  .seg input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .seg label:has(input:checked) { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .check { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; user-select: none; border-radius: 8px; justify-self: start; padding-inline: 2px 8px; }
+  .check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+  .pw { display: flex; gap: 8px; }
+  .pw input { flex: 1; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); padding: 8px 14px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; padding: 10px 18px; }
+  button.danger { color: var(--bad); border-color: var(--bad); background: transparent; }
+  button.danger.confirm { background: var(--bad); color: #fff; }
+  button.small { padding: 3px 10px; font-size: 12px; }
+  button:disabled { opacity: .55; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 18px; }
+  .actions .note { color: var(--muted); font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
+  .pill.idle { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+  .pill.run { background: var(--accent-soft); color: var(--accent); }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .card > .head .pill { white-space: normal; overflow-wrap: anywhere; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .pill.run .dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .pill.run .dot { animation: none; } }
+  .steps { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .steps li { display: flex; gap: 10px; align-items: flex-start; color: var(--muted); }
+  .steps li .mark { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); flex: none; margin-top: 2px; display: grid; place-items: center; font-size: 11px; }
+  .steps li.done { color: var(--text); }
+  .steps li.done .mark { border-color: var(--ok); background: var(--ok); color: #fff; }
+  .steps li.now { color: var(--text); font-weight: 600; }
+  .steps li.now .mark { border-color: var(--accent); }
+  .steps li.fail .mark { border-color: var(--bad); background: var(--bad); color: #fff; }
+  .result { margin-top: 16px; display: grid; gap: 10px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; align-items: center; margin: 0; }
+  .kv dt { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; overflow-wrap: anywhere; max-width: 16ch; }
+  .kv dd { margin: 0; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .kv dd code { font-family: ui-monospace, Consolas, "SFMono-Regular", Menlo, monospace; font-size: 13px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; overflow-wrap: anywhere; min-width: 0; }
+  .copy { padding: 2px 8px; font-size: 12px; flex: none; }
+  .error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; font-family: ui-monospace, Consolas, Menlo, monospace; font-size: 12.5px; }
+  details.console { margin-top: 14px; }
+  details.console summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  pre.console { margin: 8px 0 0; background: var(--console-bg); color: var(--console-ink); border-radius: 8px; padding: 12px; font: 12px/1.45 ui-monospace, Consolas, Menlo, monospace; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .links { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; margin-top: 12px; }
+  a { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  td { overflow-wrap: break-word; }
+  td.num, th.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td code { font-family: ui-monospace, Consolas, Menlo, monospace; font-size: 12.5px; }
+  td.res { min-width: 160px; }
+  td.res div + div { margin-top: 2px; }
+  td.action { white-space: nowrap; }
+  td.action .hint { display: block; margin-top: 3px; }
+  .table-wrap { overflow-x: auto; }
+  .empty { color: var(--muted); padding: 14px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">Run Job</h1>
+    <p>Fill in the job's parameters and run it: the page follows the build, streams its console and shows what the job reports as <code>@@result</code>.</p>
+  </header>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="form-title">
+      <div class="head"><h2 id="form-title">Parameters</h2><span class="pill idle" id="jobPill"><span class="dot"></span>job</span></div>
+      <div class="body">
+        <form id="form" novalidate>
+          <div class="row" id="fields">
+            <p class="hint">Loading the job's parameters…</p>
+          </div>
+          <div class="actions">
+            <button type="submit" class="primary" id="submit" disabled>Run job</button>
+            <button type="button" id="reset">Clear</button>
+            <span class="note" id="who"></span>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="run-title" aria-live="polite">
+      <div class="head"><h2 id="run-title">Run</h2><span class="pill idle" id="statusPill"><span class="dot"></span>Idle</span></div>
+      <div class="body">
+        <ol class="steps" id="steps">
+          <li data-step="queue"><span class="mark"></span><span>Queued in Jenkins</span></li>
+          <li data-step="start"><span class="mark"></span><span>Build started on the agent</span></li>
+          <li data-step="tests"><span class="mark"></span><span>Running tests</span></li>
+          <li data-step="done"><span class="mark"></span><span>Finished</span></li>
+        </ol>
+        <div class="result" id="result" hidden></div>
+        <div class="links" id="links" hidden></div>
+        <details class="console" id="consoleBox" hidden>
+          <summary>Console output</summary>
+          <pre class="console" id="console"></pre>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="recent-title">
+    <div class="head"><h2 id="recent-title">Recent runs</h2><button type="button" id="refresh">Refresh</button></div>
+    <div class="body">
+      <div class="table-wrap">
+        <table id="recent">
+          <thead><tr><th class="num">#</th><th>When</th><th>Status</th><th>Result</th></tr></thead>
+          <tbody><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="hint" id="undoHint" hidden></p>
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  // ---------- configuration: edit here, or override any key per link: ?job=...&undoJob=...&title=...&resultKey=... ----------
+  var CONFIG = {
+    job: '',            // the job to run, e.g. '/job/API/job/apiCreateBooking'; '' = the job whose HTML Publisher report serves this page
+    undoJob: '',        // optional: the job that undoes one run, e.g. '/job/API/job/apiDeleteBooking'; '' hides the Undo column
+    title: 'Run Job',   // heading and window title
+    resultKey: 'id'     // the @@result key whose value the undo job gets as its RESULT_ID parameter
+  };
+  var query = new URLSearchParams(location.search);
+  Object.keys(CONFIG).forEach(function (k) { if (query.has(k)) CONFIG[k] = query.get(k).trim(); });
+
+  var RESULT_MARK = '@@result';                  // console lines "@@result {json}": the job's result
+  var SECRET = /PASSWORD|SECRET|TOKEN/i;         // parameter / result names never shown in Recent runs
+  // Jenkins root: this page is served under the job (HTML Publisher) or under /userContent/
+  var ROOT = (function () {
+    var p = location.pathname, i = p.indexOf('/job/'), u = p.indexOf('/userContent/');
+    return p.slice(0, i >= 0 ? i : (u >= 0 ? u : p.lastIndexOf('/')));
+  })();
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $('form'), fieldsBox = $('fields'), submit = $('submit'), statusPill = $('statusPill'), steps = $('steps');
+  var result = $('result'), links = $('links'), consoleBox = $('consoleBox'), consoleEl = $('console');
+  // any script error lands in the Run card instead of failing silently
+  window.addEventListener('error', function (ev) { showError('Page error: ' + (ev.message || ev.error)); });
+  // inside the HTML Publisher frame (the sidebar entry): offer the page on its own
+  if (window.top !== window.self) {
+    var open = document.createElement('a');
+    open.href = location.href; open.target = '_top'; open.textContent = 'Open as a full page';
+    open.className = 'pill idle'; open.style.textDecoration = 'none';
+    document.querySelector('header').appendChild(open);
+  }
+
+  // a job path relative to the Jenkins root: /job/<name> or /job/<folder>/job/<name> (nothing else is fetched or POSTed)
+  function jobPath(p) {
+    p = String(p || '').trim().replace(/\/+$/, '');
+    if (!p) return '';
+    if (!/^(\/job\/[^\/?#\s]+)+$/.test(p) || /\/job\/\.\.?(\/|$)/.test(p)) throw new Error('Not a Jenkins job path: "' + p + '" (expected /job/<folder>/job/<name>)');
+    return p;
+  }
+  // the job whose HTML Publisher report serves this page: /job/API/job/apiCreateBooking/Run_20Job/jobForm.html
+  function publishingJob() {
+    var m = /^((?:\/job\/[^\/]+)+)/.exec(location.pathname.slice(ROOT.length));
+    return m ? m[1] : '';
+  }
+  function jobLabel(path) {
+    var s = path.replace(/^\/job\//, '').replace(/\/job\//g, '/');
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+  var JOB = '', UNDO_JOB = '', RESULT_KEY = CONFIG.resultKey || 'id', configError = '';
+  try {
+    JOB = jobPath(CONFIG.job) || publishingJob();
+    UNDO_JOB = jobPath(CONFIG.undoJob);
+    if (!JOB) configError = 'No job to run: open this page with ?job=/job/<folder>/job/<name>, or set CONFIG.job';
+  } catch (e) { configError = e.message; }
+  document.title = CONFIG.title || 'Run Job';
+  $('title').textContent = CONFIG.title || 'Run Job';
+  setPill($('jobPill'), 'idle', JOB ? 'job ' + jobLabel(JOB) : 'no job');
+
+  function get(url, opts) {
+    opts = opts || {}; opts.credentials = 'same-origin';
+    return fetch(url, opts);
+  }
+  function json(url) { return get(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url); return r.json(); }); }
+  function crumb() {
+    return get(ROOT + '/crumbIssuer/api/json').then(function (r) {
+      if (r.status === 404) return {};                       // CSRF protection off
+      if (!r.ok) throw new Error('Not signed in to Jenkins (HTTP ' + r.status + ' from crumbIssuer)');
+      return r.json().then(function (j) { var h = {}; h[j.crumbRequestField] = j.crumb; return h; });
+    });
+  }
+  function setPill(pill, kind, text) { pill.className = 'pill ' + kind; pill.innerHTML = '<span class="dot"></span>' + esc(text); }
+  function setStatus(kind, text) { setPill(statusPill, kind, text); }
+  function setStep(name, state) {
+    var items = steps.querySelectorAll('li'), reached = false;
+    for (var i = 0; i < items.length; i++) {
+      var li = items[i], mark = li.querySelector('.mark');
+      if (li.dataset.step === name) {
+        li.className = state; mark.textContent = state === 'done' ? '✓' : state === 'fail' ? '!' : '';
+        reached = true;
+      } else if (!reached) { li.className = 'done'; mark.textContent = '✓'; }
+      else { li.className = ''; mark.textContent = ''; }
+    }
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  // Jenkins writes absolute URLs from its configured root URL, which may not be the host in use (a proxy or tunnel): keep the path only
+  function sameOrigin(url) { var u = new URL(url, location.href); return location.origin + u.pathname + u.search; }
+  function copyButton(text) {
+    var b = el('button', 'copy', 'Copy'); b.type = 'button';
+    b.addEventListener('click', function () {
+      var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1500); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { fallback(); });
+      else fallback();
+      function fallback() { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch (e) {} t.remove(); }
+    });
+    return b;
+  }
+  function kv(pairs) {
+    var dl = el('dl', 'kv');
+    pairs.forEach(function (p) {
+      var dd = el('dd');
+      dd.appendChild(el('code', '', p[1])); dd.appendChild(copyButton(p[1]));
+      dl.appendChild(el('dt', '', p[0])); dl.appendChild(dd);
+    });
+    return dl;
+  }
+
+  // --- the result protocol: "@@result {json}" lines, merged in order (a later key wins) ---
+  function results(text) {
+    var merged = Object.create(null);   // no prototype: a "__proto__" or "constructor" key is just a key
+    String(text || '').split(/\r?\n/).forEach(function (line) {
+      var i = line.indexOf(RESULT_MARK), obj;
+      if (i < 0) return;
+      try { obj = JSON.parse(line.slice(i + RESULT_MARK.length).trim()); } catch (e) { return; }
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return;
+      Object.keys(obj).forEach(function (k) { merged[k] = obj[k]; });
+    });
+    return merged;
+  }
+  function str(v) { return typeof v === 'string' ? v : v === undefined ? '' : JSON.stringify(v); }
+  function undoId(res) { return UNDO_JOB && RESULT_KEY in res ? str(res[RESULT_KEY]) : ''; }
+  function reachedTests(text) { return text.indexOf('Running TestSuite') >= 0 || text.indexOf('@@live') >= 0; }
+
+  // --- the form: built from the job's own parameter definitions ---
+  var defs = [], controls = [], hasEnv = false, ready = false;
+  function isSecret(d) { return d.type === 'PasswordParameterDefinition' || SECRET.test(d.name); }
+  function defaultOf(d) {
+    var v = d.defaultParameterValue ? d.defaultParameterValue.value : null;
+    return v == null || typeof v === 'object' ? '' : v;
+  }
+  function loadDefs() {
+    var tree = 'property[parameterDefinitions[name,type,description,defaultParameterValue[value],choices]]';
+    return json(ROOT + JOB + '/api/json?tree=' + tree).then(function (j) {
+      defs = [];
+      (j.property || []).forEach(function (p) { (p.parameterDefinitions || []).forEach(function (d) { if (d && d.name) defs.push(d); }); });
+      hasEnv = defs.some(function (d) { return d.name === 'ENV'; });
+      controls = defs.map(field);
+      fieldsBox.textContent = '';
+      controls.forEach(function (c) { fieldsBox.appendChild(c.el); });
+      if (!controls.length) fieldsBox.appendChild(el('p', 'hint', 'This job has no parameters: Run job starts it as it is.'));
+    }, function (e) {
+      throw new Error(/HTTP 404/.test(e.message) ? 'The job ' + JOB + ' does not exist in Jenkins, or this user cannot see it' : e.message);
+    });
+  }
+  function field(d, i) {
+    var id = 'p' + i, def = defaultOf(d), wrap = el('div', 'field'), name = el('label', 'name', d.name.replace(/_/g, ' '));
+    var c = { d: d, el: wrap, secret: false, get: null };
+    var choices = Array.isArray(d.choices) ? d.choices.map(String) : null;
+    wrap.appendChild(name);
+    if (choices && choices.length && choices.length <= 4) {
+      // a few choices: a segmented radio group
+      var seg = el('div', 'seg'), pick = Math.max(0, choices.indexOf(String(def)));
+      seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', d.name);
+      choices.forEach(function (choice, k) {
+        var l = el('label'), r = document.createElement('input');
+        r.type = 'radio'; r.name = id; r.id = id + '_' + k; r.value = choice; r.defaultChecked = r.checked = k === pick;
+        l.appendChild(r); l.appendChild(document.createTextNode(choice)); seg.appendChild(l);
+      });
+      name.htmlFor = id + '_' + pick;
+      c.get = function () { var r = seg.querySelector('input:checked'); return r ? r.value : ''; };
+      wrap.appendChild(seg);
+    } else if (choices && choices.length) {
+      var sel = document.createElement('select'), pickS = Math.max(0, choices.indexOf(String(def)));
+      sel.id = id; name.htmlFor = id;
+      choices.forEach(function (choice, k) { var o = el('option', '', choice); o.value = choice; o.defaultSelected = o.selected = k === pickS; sel.appendChild(o); });
+      c.get = function () { return sel.value; };
+      wrap.appendChild(sel);
+    } else if (d.type === 'BooleanParameterDefinition') {
+      var box = document.createElement('input'), check = el('label', 'check');
+      box.type = 'checkbox'; box.id = id; box.defaultChecked = box.checked = def === true || String(def) === 'true';
+      name.htmlFor = id;
+      check.appendChild(box); check.appendChild(el('span', '', 'Yes'));
+      c.get = function () { return box.checked ? 'true' : 'false'; };
+      wrap.appendChild(check);
+    } else if (isSecret(d)) {
+      var pw = el('div', 'pw'), input = document.createElement('input'), show = el('button', '', 'Show');
+      input.type = 'password'; input.id = id; input.defaultValue = String(def);
+      input.setAttribute('autocomplete', 'new-password'); input.placeholder = "empty = the job's default";
+      show.type = 'button'; show.setAttribute('aria-label', 'Show ' + d.name);
+      show.addEventListener('click', function () {
+        var reveal = input.type === 'password';
+        input.type = reveal ? 'text' : 'password'; show.textContent = reveal ? 'Hide' : 'Show';
+        show.setAttribute('aria-label', (reveal ? 'Hide ' : 'Show ') + d.name);
+      });
+      name.htmlFor = id;
+      pw.appendChild(input); pw.appendChild(show);
+      c.secret = true; c.get = function () { return input.value; };
+      wrap.appendChild(pw);
+    } else {
+      var text = document.createElement('input');
+      text.type = 'text'; text.id = id; text.defaultValue = String(def);
+      text.setAttribute('autocomplete', 'off'); text.spellcheck = false;
+      name.htmlFor = id;
+      c.get = function () { return text.value.trim(); };
+      wrap.appendChild(text);
+    }
+    // the description as plain text (a Jenkins description may hold HTML: its tags are dropped, never rendered)
+    var hint = String(d.description || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (hint) wrap.appendChild(el('span', 'hint', hint));
+    if (hint.length > 90) wrap.classList.add('full');
+    return c;
+  }
+  function formValues() {
+    var v = {};
+    controls.forEach(function (c) {
+      var val = c.get();
+      if (c.secret && val === '') return;     // left empty: the job's own default
+      v[c.d.name] = val;
+    });
+    return v;
+  }
+
+  // --- Jenkins: start a job and follow it ---
+  function trigger(jobPath, params, parameterized) {
+    return crumb().then(function (headers) {
+      var opts = { method: 'POST', headers: headers };
+      if (parameterized) { headers['Content-Type'] = 'application/x-www-form-urlencoded'; opts.body = new URLSearchParams(params); }
+      return get(ROOT + jobPath + (parameterized ? '/buildWithParameters' : '/build'), opts);
+    }).then(function (r) {
+      if (r.status === 404) throw new Error('The job ' + jobPath + ' does not exist in Jenkins');
+      if (r.status !== 201) throw new Error('Jenkins refused the build: HTTP ' + r.status + (r.status === 403 ? ' (sign in, or no Build permission)' : ''));
+      var queue = r.headers.get('Location');
+      if (!queue) throw new Error('Jenkins gave no queue item for the build');
+      return queue;
+    });
+  }
+  function waitForBuild(queueUrl, onWait) {
+    var api = sameOrigin(queueUrl).replace(/\/?$/, '/') + 'api/json';
+    return (function poll(n) {
+      return json(api).then(function (item) {
+        if (item.cancelled) throw new Error('The build was cancelled in the queue');
+        if (item.executable && item.executable.url) return sameOrigin(item.executable.url);
+        if (n > 600) throw new Error('Still queued after 10 minutes: ' + (item.why || ''));
+        if (onWait) onWait(item.why ? 'Queued: ' + item.why.replace(/^Waiting for next available executor on /, 'waiting for ') : 'Queued');
+        return sleep(1000).then(function () { return poll(n + 1); });
+      });
+    })(0);
+  }
+  function waitForResult(buildUrl) {
+    return (function poll(n) {
+      return json(buildUrl + 'api/json?tree=building,result,number').then(function (b) {
+        if (b.building === false) return b;
+        if (n > 600) throw new Error('Still running after 20 minutes');
+        return sleep(2000).then(function () { return poll(n + 1); });
+      });
+    })(0);
+  }
+
+  // --- run: trigger and follow one build ---
+  var running = false;
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (running || !ready) return;
+    var params = formValues();
+    running = true; submit.disabled = true;
+    result.hidden = true; result.innerHTML = ''; links.hidden = true; links.innerHTML = '';
+    consoleEl.textContent = ''; consoleBox.hidden = true;
+    setStatus('run', 'Queuing');
+    setStep('queue', 'now');
+
+    trigger(JOB, params, defs.length > 0).then(function (queue) {
+      return waitForBuild(queue, function (why) { setStatus('run', why); });
+    }).then(function (url) {
+      setStep('start', 'now'); setStatus('run', 'Running');
+      addLink('Build', url); addLink('Console', url + 'console');
+      consoleBox.hidden = false;
+      return streamConsole(url);
+    }).then(function (info) {
+      if (info.result === 'SUCCESS') {
+        setStep('done', 'done'); setStatus('ok', 'Success');
+      } else {
+        setStep(reachedTests(info.text) ? 'tests' : 'start', 'fail');
+        setStatus('bad', info.result || 'Failed');
+        showError(failureReason(info.text) || ('Build ended with ' + info.result));
+      }
+      showResult(results(info.text), info.result === 'SUCCESS');
+      if (hasEnv) { var env = params.ENV || 'Test'; addLink(env + ' Report', ROOT + JOB + '/' + reportDir(env) + '/'); }
+    }).catch(function (e) {
+      setStatus('bad', 'Error'); showError(e.message);
+      var now = steps.querySelector('li.now'); if (now) { now.className = 'fail'; now.querySelector('.mark').textContent = '!'; }
+    }).then(function () { running = false; submit.disabled = false; loadRecent(); });
+  });
+
+  // progressiveText: X-Text-Size is the next offset, X-More-Data says the build is still writing
+  function streamConsole(url) {
+    var offset = 0, text = '';
+    return (function poll() {
+      return get(url + 'logText/progressiveText?start=' + offset).then(function (r) {
+        return r.text().then(function (chunk) {
+          if (chunk) { text += chunk; consoleEl.textContent = text; consoleEl.scrollTop = consoleEl.scrollHeight; }
+          offset = parseInt(r.headers.get('X-Text-Size') || offset, 10);
+          if (reachedTests(text)) setStep('tests', 'now');
+          if (r.headers.get('X-More-Data') === 'true') return sleep(1500).then(poll);
+          return json(url + 'api/json?tree=result,number,duration').then(function (b) { return { result: b.result, number: b.number, duration: b.duration, text: text }; });
+        });
+      });
+    })();
+  }
+
+  function showResult(res, ok) {
+    var keys = Object.keys(res);
+    if (!keys.length) {
+      if (ok) { result.hidden = false; result.appendChild(el('div', 'hint', 'The build printed no ' + RESULT_MARK + ' line.')); }
+      return;
+    }
+    result.hidden = false;
+    result.appendChild(kv(keys.map(function (k) { return [k, str(res[k])]; })));
+    var id = undoId(res);
+    if (id) result.appendChild(el('div', 'hint', 'To undo it later: Undo in Recent runs below (starts ' + jobLabel(UNDO_JOB) + ' with RESULT_ID ' + id + ').'));
+  }
+  function showError(message) {
+    result.hidden = false;
+    result.appendChild(el('div', 'error', message));
+  }
+  function failureReason(text) {
+    var lines = String(text || '').split('\n').filter(function (l) { return l.indexOf('@@live') < 0 && l.indexOf(RESULT_MARK) < 0; }), i;
+    var patterns = [/AssertionError: (.*)/, /Exception: (.*)/, /ERROR\] (.*)/];
+    for (var p = 0; p < patterns.length; p++) for (i = 0; i < lines.length; i++) if (patterns[p].test(lines[i])) return lines[i].replace(/^.*?(java\.lang\.)?/, '').trim();
+    return '';
+  }
+  // the URL name HTML Publisher gives a report: "Test Report" -> Test_20Report
+  function reportDir(env) { return encodeURIComponent(env + ' Report').replace(/%/g, '_'); }
+  function addLink(label, href) {
+    links.hidden = false;
+    var a = el('a', '', label); a.href = href; a.target = '_top'; links.appendChild(a);
+  }
+
+  // --- recent runs: the job's builds with their parameters, the result read from each console, "Undone" from the undo job ---
+  function buildParams(b) {
+    var params = Object.create(null);   // a parameter named like an Object method is just a name
+    (b.actions || []).forEach(function (a) { (a.parameters || []).forEach(function (p) { params[p.name] = p.value == null ? '' : String(p.value); }); });
+    return params;
+  }
+  function undos() {
+    // the undo job's builds per RESULT_ID, newest first
+    if (!UNDO_JOB) return Promise.resolve(Object.create(null));
+    return json(ROOT + UNDO_JOB + '/api/json?tree=builds[number,url,result,building,actions[parameters[name,value]]]{0,60}').then(function (job) {
+      var map = Object.create(null);
+      (job.builds || []).forEach(function (b) {
+        var p = buildParams(b);
+        if (!p.RESULT_ID) return;
+        (map[p.RESULT_ID] = map[p.RESULT_ID] || []).push({ env: p.ENV || '', number: b.number, url: sameOrigin(b.url), result: b.result, building: b.building });
+      });
+      return map;
+    }).catch(function () { return Object.create(null); });   // no undo job yet, or not allowed to see it
+  }
+  // the newest undo of that id on the run's env (an undo job without ENV matches any env)
+  function findUndo(map, run) {
+    var list = map[run.id] || [];
+    for (var i = 0; i < list.length; i++) if (!list[i].env || !run.env || list[i].env === run.env) return list[i];
+    return null;
+  }
+  function columns() { return defs.filter(function (d) { return !isSecret(d); }); }   // secret parameters: no column, never a value
+  function renderHead() {
+    var cols = columns();
+    $('recent').querySelector('thead tr').innerHTML = '<th class="num">#</th><th>When</th>'
+      + cols.map(function (d) { return '<th>' + esc(d.name.replace(/_/g, ' ')) + '</th>'; }).join('')
+      + '<th>Status</th><th>Result</th>' + (UNDO_JOB ? '<th>Action</th>' : '');
+    return cols.length + 4 + (UNDO_JOB ? 1 : 0);
+  }
+  function summary(res) {
+    return Object.keys(res).filter(function (k) { return !SECRET.test(k); }).map(function (k) {
+      var v = str(res[k]), short = v.length > 60 ? v.slice(0, 59) + '…' : v;
+      return '<div><span class="hint">' + esc(k) + '</span> <code title="' + esc(v) + '">' + esc(short) + '</code></div>';
+    }).join('');
+  }
+  function loadRecent() {
+    var tbody = $('recent').querySelector('tbody'), cols = columns(), span = renderHead();
+    Promise.all([
+      json(ROOT + JOB + '/api/json?tree=builds[number,url,result,building,timestamp,actions[parameters[name,value]]]{0,15}'),
+      undos()
+    ]).then(function (both) {
+      var job = both[0], undone = both[1];
+      if (!job.builds || !job.builds.length) { tbody.innerHTML = '<tr><td colspan="' + span + '" class="empty">No runs yet</td></tr>'; return; }
+      return Promise.all(job.builds.map(function (b) {
+        return get(sameOrigin(b.url) + 'consoleText').then(function (r) { return r.ok ? r.text() : ''; }).catch(function () { return ''; }).then(function (text) {
+          return { b: b, params: buildParams(b), res: results(text) };
+        });
+      })).then(function (rows) {
+        tbody.innerHTML = '';
+        rows.forEach(function (x) {
+          var b = x.b, p = x.params, tr = document.createElement('tr');
+          var status = b.building ? ['run', 'Running'] : b.result === 'SUCCESS' ? ['ok', 'Success'] : b.result === 'ABORTED' ? ['warn', 'Aborted'] : ['bad', b.result || '?'];
+          tr.innerHTML = '<td class="num"><a href="' + esc(sameOrigin(b.url)) + '" target="_top">#' + esc(b.number) + '</a></td>'
+            + '<td class="num">' + esc(when(b.timestamp)) + '</td>'
+            + cols.map(function (d) { return '<td>' + esc(p[d.name]) + '</td>'; }).join('')
+            + '<td><span class="pill ' + status[0] + '"><span class="dot"></span>' + esc(status[1]) + '</span></td>'
+            + '<td class="res">' + summary(x.res) + '</td>'
+            + (UNDO_JOB ? '<td class="action"></td>' : '');
+          var id = undoId(x.res);
+          if (id && !b.building) {
+            var run = { id: id, env: p.ENV || '', hasEnv: 'ENV' in p };
+            renderUndo(tr.querySelector('td.action'), run, findUndo(undone, run));
+          }
+          tbody.appendChild(tr);
+        });
+      });
+    }).catch(function (e) { tbody.innerHTML = '<tr><td colspan="' + span + '" class="empty">' + esc(e.message) + '</td></tr>'; });
+  }
+  function renderUndo(cell, run, undo) {
+    cell.innerHTML = '';
+    if (undo && undo.result === 'SUCCESS') {
+      cell.innerHTML = '<span class="pill idle">Undone</span> <a class="hint" href="' + esc(undo.url) + '" target="_top">undo #' + esc(undo.number) + '</a>';
+      return;
+    }
+    if (undo && undo.building) {
+      cell.innerHTML = '<span class="pill run"><span class="dot"></span>Undoing</span> <a class="hint" href="' + esc(undo.url) + '" target="_top">undo #' + esc(undo.number) + '</a>';
+      setTimeout(loadRecent, 5000);
+      return;
+    }
+    var b = el('button', 'danger small', 'Undo'); b.type = 'button';
+    var armed = null, label = run.id.length > 40 ? run.id.slice(0, 39) + '…' : run.id;
+    b.addEventListener('click', function () {
+      if (!armed) {   // first click arms the button for 4 s, the second one starts the undo job
+        b.textContent = 'Undo ' + label + '?'; b.classList.add('confirm');
+        armed = setTimeout(function () { armed = null; b.textContent = 'Undo'; b.classList.remove('confirm'); }, 4000);
+        return;
+      }
+      clearTimeout(armed); armed = null;
+      b.disabled = true; b.textContent = 'Undoing'; b.classList.remove('confirm');
+      undoRun(run, cell);
+    });
+    cell.appendChild(b);
+    if (undo && undo.result && undo.result !== 'SUCCESS') {
+      var note = el('a', 'hint', 'undo #' + undo.number + ' ' + undo.result.toLowerCase()); note.href = undo.url; note.target = '_top';
+      cell.appendChild(note);
+    }
+  }
+  function undoRun(run, cell) {
+    var note = el('span', 'hint'); cell.appendChild(note);
+    var params = { RESULT_ID: run.id };
+    if (run.hasEnv) params.ENV = run.env;
+    trigger(UNDO_JOB, params, true)
+      .then(function (queue) { return waitForBuild(queue, function (why) { note.textContent = why; }); })
+      .then(function (url) { note.textContent = 'running'; return waitForResult(url).then(function (b) { return { url: url, result: b.result, number: b.number }; }); })
+      .then(function (b) {
+        renderUndo(cell, run, { env: run.env, number: b.number, url: b.url, result: b.result, building: false });
+        if (b.result !== 'SUCCESS') {
+          return get(b.url + 'consoleText').then(function (r) { return r.text(); }).then(function (text) {
+            cell.appendChild(el('span', 'hint', failureReason(text) || ('undo build ended with ' + b.result)));
+          });
+        }
+      })
+      .catch(function (e) {
+        renderUndo(cell, run, null);
+        cell.appendChild(el('span', 'hint', e.message));
+      });
+  }
+  function when(ts) {
+    var d = new Date(ts), pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  // --- start ---
+  $('reset').addEventListener('click', function () { form.reset(); });
+  $('refresh').addEventListener('click', function () { if (!configError) loadRecent(); });
+  if (UNDO_JOB) {
+    $('undoHint').hidden = false;
+    $('undoHint').textContent = 'Undo starts the job ' + jobLabel(UNDO_JOB) + ' with RESULT_ID = the run\'s @@result "' + RESULT_KEY + '" (and its ENV); "Undone" is read from that job\'s builds.';
+  }
+  json(ROOT + '/me/api/json?tree=fullName').then(function (me) { $('who').textContent = 'Runs as ' + me.fullName; }).catch(function () { $('who').textContent = 'Sign in to Jenkins to run the job'; });
+  if (configError) {
+    fieldsBox.textContent = ''; fieldsBox.appendChild(el('div', 'error', configError));
+    $('recent').querySelector('tbody').innerHTML = '<tr><td colspan="4" class="empty">' + esc(configError) + '</td></tr>';
+    setStatus('bad', 'No job');
+  } else {
+    loadDefs().then(function () { ready = true; submit.disabled = false; }, function (e) {
+      fieldsBox.textContent = ''; fieldsBox.appendChild(el('div', 'error', 'Could not read the job\'s parameters: ' + e.message));
+    }).then(loadRecent);
+  }
+})();
+</script>
+</body>
+</html>

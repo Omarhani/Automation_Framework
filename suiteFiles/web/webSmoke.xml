@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<suite name="Web Smoke">
+    <!-- Test or Stage (a key of ENVIRONMENTS in data/testData.json), from -DserverType; unset = Test -->
+    <parameter name="server" value="${serverType}"/>
+    <!-- Chrome, Edge, headlessChrome, headlessEdge, from -DbrowserType; unset = Chrome -->
+    <parameter name="browser" value="${browserType}"/>
+
+    <test name="Home page opens">
+        <groups><run><include name="Web"/></run></groups>
+        <classes>
+            <class name="ui.home.HomeTests"/>
+        </classes>
+    </test>
+</suite>

@@ -1,8 +1,62 @@
 {
-  "UI": {
-    "BASE_URL": ""
+  "ENVIRONMENTS": {
+    "Test": {
+      "WEB_URL": "",
+      "API_BASE_URI": "",
+      "MOBILE_API_BASE_URI": ""
+    },
+    "Stage": {
+      "WEB_URL": "",
+      "API_BASE_URI": "",
+      "MOBILE_API_BASE_URI": ""
+    }
   },
-  "API" : {
-    "BASE_URI": ""
+  "ACCOUNTS": [
+    { "CODE": "", "ENV": "", "ADMIN": "", "PASSWORD": "" }
+  ],
+  "UI": {
+    "URLs": {},
+    "VERIFICATION_CODES": {},
+    "USERS": {
+      "MAIN_USER": {
+        "EMAIL": "",
+        "USERNAME": "",
+        "PASSWORD": "",
+        "NEW_PASSWORD": "",
+        "WRONG_PASSWORD": "",
+        "FIRST_NAME": "",
+        "LAST_NAME": ""
+      }
+    }
+  },
+  "API": {
+    "HEADERS": {},
+    "USERS": {
+      "ADMIN": {
+        "USERNAME": "",
+        "PASSWORD": ""
+      }
+    }
+  },
+  "MOBILE": {
+    "DEVICE_NAME": "",
+    "WIFI_UDID": "",
+    "APP_PACKAGE": "",
+    "APP_ACTIVITY": "",
+    "APK_PATH": "",
+    "SESSION_FILE": "",
+    "VERIFICATION_CODES": {},
+    "USERS": {
+      "MAIN_USER": {
+        "EMAIL": "",
+        "USERNAME": "",
+        "PASSWORD": ""
+      }
+    }
+  },
+  "EMAIL": {
+    "IMAP_HOST": "imap.gmail.com",
+    "MAILBOX": "",
+    "SENDER": ""
   }
 }

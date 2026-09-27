@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Runner</title>
+<!--
+  Live Runner: start a suite's Jenkins job and watch it run, like the Cypress runner - which test runs, each step
+  with its element and locator as it happens, the browser's picture, and the API calls behind the screen.
+
+  Served by Jenkins itself (HTML Publisher target of a job, or /userContent/), so it is same-origin and uses the
+  signed-in session: the job list and parameters come from the Jenkins API, Run POSTs buildWithParameters with the
+  CSRF crumb and follows the queue item to the build, then the build's console is read as it grows
+  (logText/progressiveText). The test JVM writes one "@@live {json}" line per event (utils.LiveFeed); everything
+  else in the console is shown in the Console box. The live picture: each frame event names a jpg in
+  live/<build>/ of the job's workspace, served by Jenkins at /job/<job>/ws/live/<build>/ (the run event gives it).
+
+  ?build=<build url> opens a build straight away (the Watch links use it). No library, no external resource.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --surface-2: #f7f9fb;
+    --text: #1b2430;
+    --muted: #5f6b79;
+    --border: #d9dfe6;
+    --accent: #0b6e8f;
+    --accent-ink: #ffffff;
+    --accent-soft: #e2f1f6;
+    --ok: #2f8f4e;
+    --ok-soft: #e4f4e9;
+    --bad: #c23a3a;
+    --bad-soft: #fbe7e7;
+    --warn: #b7791f;
+    --warn-soft: #fbf1dc;
+    --step: #c2255c;
+    --open: #7048b6;
+    --console-bg: #14191f;
+    --console-ink: #d7dee6;
+    --shadow: 0 1px 2px rgba(20, 30, 40, .06), 0 6px 20px rgba(20, 30, 40, .06);
+    --radius: 10px;
+    --mono: ui-monospace, Consolas, "SFMono-Regular", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #0f1419;
+      --surface: #171d25;
+      --surface-2: #1d242d;
+      --text: #e6edf3;
+      --muted: #98a4b3;
+      --border: #2b3540;
+      --accent: #58b4d6;
+      --accent-ink: #0b1218;
+      --accent-soft: #163340;
+      --ok: #5fc27c;
+      --ok-soft: #173424;
+      --bad: #ef7373;
+      --bad-soft: #3a1c1c;
+      --warn: #e0b45b;
+      --warn-soft: #3a2f16;
+      --step: #ff6b9a;
+      --open: #b394f0;
+      --console-bg: #0b0f14;
+      --console-ink: #cfd8e1;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding: 20px 20px 40px; }
+  .wrap { max-width: 1480px; margin: 0 auto; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+  header h1 { font-size: 22px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); flex: 1 1 320px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+  .card > .head { padding: 11px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .card > .head h2 { font-size: 14px; margin: 0; font-weight: 650; }
+  .card > .head .grow { flex: 1; }
+  .card > .body { padding: 14px 16px; }
+  /* Run a suite takes only the width it needs; Runs gets the rest, its lists scroll inside it, and both cards
+     are as tall as Runs */
+  .top { display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+  .top > .card { display: flex; flex-direction: column; min-height: 0; }
+  .top > .card:not(.now) .form { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .top > .card.now > .body { overflow: auto; max-height: min(520px, 60vh); }
+  @media (max-width: 900px) { .top { grid-template-columns: 1fr; } }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px 14px; }
+  .field { display: grid; gap: 4px; min-width: 0; }
+  .field.wide { grid-column: 1 / -1; }
+  label.name { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); }
+  input[type=text], input[type=password], select { width: 100%; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; min-width: 0; }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); padding: 6px 12px; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; padding: 8px 16px; }
+  button.small { padding: 2px 9px; font-size: 12px; }
+  button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  button:disabled { opacity: .55; cursor: default; }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
+  .pill.idle { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+  .pill.run { background: var(--accent-soft); color: var(--accent); }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .pill.run .dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .pill.run .dot, .spin { animation: none !important; } }
+  a { color: var(--accent); }
+  .error { background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 9px 12px; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12.5px; }
+  .running { display: grid; gap: 6px; }
+  .running .item { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
+  .running .item .what { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .empty { color: var(--muted); font-size: 13px; }
+
+  /* the watched build */
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 12px 16px; }
+  .bar .title { font-weight: 650; font-size: 15px; }
+  .bar .meta { color: var(--muted); font-size: 13px; }
+  .progress { flex: 1 1 220px; min-width: 160px; height: 8px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; display: flex; }
+  .progress i { display: block; height: 100%; }
+  .progress i.p { background: var(--ok); } .progress i.f { background: var(--bad); } .progress i.s { background: var(--warn); }
+  .counts { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .counts b.p { color: var(--ok); } .counts b.f { color: var(--bad); } .counts b.s { color: var(--warn); }
+  /* the three panels side by side, all the same height, each scrolling on its own (like the Cypress runner):
+     the page itself does not scroll while you follow a run */
+  .main { display: grid; grid-template-columns: minmax(230px, .75fr) minmax(0, 1.35fr) minmax(0, 1.25fr); gap: 16px;
+    align-items: stretch; height: max(480px, calc(100vh - 96px)); }
+  .main > .card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .main > .card > .head { flex: none; }
+  .tests, .log { flex: 1; min-height: 0; overflow: auto; }
+  .main .screen { flex: 1; min-height: 0; overflow: auto; }
+  /* narrower: the browser on top, tests and steps below it, side by side and of equal height */
+  @media (max-width: 1250px) {
+    .main { grid-template-columns: minmax(230px, .8fr) minmax(0, 1.6fr); grid-template-rows: auto max(420px, calc(100vh - 96px)); height: auto; }
+    .main .shot { grid-column: 1 / -1; grid-row: 1; }
+    .main .shot .screen img, .main .shot .screen .ph { max-height: 46vh; }
+  }
+  @media (max-width: 820px) { .main { grid-template-columns: 1fr; grid-template-rows: none; } .tests, .log { max-height: 70vh; } }
+  .suite-h { padding: 8px 14px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+  .t { display: flex; align-items: flex-start; gap: 8px; padding: 7px 14px; cursor: pointer; border-left: 3px solid transparent; }
+  .t:hover { background: var(--surface-2); }
+  .t.sel { background: var(--accent-soft); border-left-color: var(--accent); }
+  .t .ic { width: 18px; flex: none; text-align: center; font-weight: 700; }
+  .t .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .t .nm small { display: block; color: var(--muted); }
+  .t .tm { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ic.pass { color: var(--ok); } .ic.fail { color: var(--bad); } .ic.skip { color: var(--warn); } .ic.run { color: var(--accent); }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: rot .8s linear infinite; vertical-align: -1px; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .log { font-size: 12.5px; }
+  .r { display: flex; align-items: flex-start; gap: 8px; padding: 4px 14px; line-height: 1.45; }
+  .r:nth-child(even) { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+  .r .no { min-width: 22px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .r .a { min-width: 48px; font-weight: 650; color: var(--step); }
+  .r .m { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .r .l2 { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+  .r .tm { color: var(--muted); font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .code { font-family: var(--mono); font-size: 11.5px; direction: ltr; unicode-bidi: isolate; overflow-wrap: anywhere; }
+  .tag { font-family: var(--mono); color: var(--muted); }
+  bdi { unicode-bidi: isolate; }
+  .r.net { padding-left: 44px; } .r.net .a { color: var(--accent); min-width: 40px; }
+  .r.open .a { color: var(--open); }
+  .r.chk .a { color: var(--ok); } .r.chk.bad .a { color: var(--bad); }
+  .r.bad { background: var(--bad-soft) !important; } .r.warn { background: var(--warn-soft) !important; }
+  .r.bad .a { color: var(--bad); }
+  .st { font-weight: 650; color: var(--ok); white-space: nowrap; } .st.bad { color: var(--bad); } .st.warn { color: var(--warn); } .st.off { color: var(--muted); font-weight: 400; }
+  .screen { padding: 12px 16px 14px; }
+  .screen img { width: 100%; display: block; border: 1px solid var(--border); border-radius: 8px; background: #000; aspect-ratio: 16 / 9; object-fit: contain; cursor: zoom-in; }
+  /* the picture full screen: it keeps updating live (or stays on the step you picked); Esc, a click or the close button closes it */
+  .zoom { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 16px; cursor: zoom-out; }
+  .zoom img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; border-radius: 6px; background: #000; }
+  .zoom .zcap { color: #e6edf3; font-size: 13px; max-width: 100%; overflow-wrap: anywhere; text-align: center; }
+  .zoom .zcap .code { color: #98a4b3; }
+  .zoom button { position: absolute; top: 12px; right: 16px; background: #374151; color: #fff; border: 0; font-size: 16px; }
+  .screen .ph { aspect-ratio: 16 / 9; border: 1px dashed var(--border); border-radius: 8px; display: grid; place-items: center; color: var(--muted); text-align: center; padding: 20px; font-size: 13px; }
+  .screen .cap { margin-top: 8px; font-size: 13px; overflow-wrap: anywhere; }
+  .screen .cap small { color: var(--muted); }
+  .failbox { margin: 10px 14px; }
+  details.console summary { cursor: pointer; padding: 11px 16px; font-weight: 650; font-size: 14px; }
+  pre.console { margin: 0 16px 16px; background: var(--console-bg); color: var(--console-ink); border-radius: 8px; padding: 12px; font: 12px/1.45 var(--mono); max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .netsum { padding: 8px 14px; font-size: 12.5px; color: var(--muted); }
+  .netsum b.bad { color: var(--bad); } .netsum b.warn { color: var(--warn); }
+  table.nt { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.nt th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+  table.nt td { padding: 5px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.nt td.num { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--muted); }
+  table.nt td.path { width: 100%; }
+  table.nt td.path .code { word-break: break-word; overflow-wrap: anywhere; }
+  table.nt td.path .msg { display: block; font-weight: 400; font-size: 11.5px; margin-top: 1px; }
+  table.nt td.st { white-space: nowrap; }
+  tr.nr { cursor: pointer; } tr.nr:hover > td { background: var(--surface-2); }
+  tr.nr.bad > td { background: var(--bad-soft); } tr.nr.warn > td { background: var(--warn-soft); }
+  tr.nr.opened > td { box-shadow: inset 0 -1px 0 var(--accent); }
+  tr.dr > td { background: var(--surface-2); padding: 0 8px; }
+  .det { padding: 8px 4px 10px; font-size: 12.5px; cursor: auto; }
+  .det .kv2 { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 8px 0; }
+  .det .kv2 > :nth-child(odd) { color: var(--muted); }
+  .det .k { margin-top: 10px; font-weight: 650; font-size: 12px; }
+  .det pre { margin: 4px 0 0; background: var(--console-bg); color: var(--console-ink); border-radius: 6px; padding: 8px 10px; font: 11.5px/1.45 var(--mono); max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .det.inrow { margin: 0 14px 8px 44px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px 10px; }
+  .r.clk { cursor: pointer; } .r.clk:hover { outline: 1px solid var(--border); }
+  .st.ok { color: var(--ok); }
+  .log [data-k] { cursor: pointer; }
+  .r.pinned, tr.nr.pinned > td { background: var(--accent-soft) !important; box-shadow: inset 3px 0 0 var(--accent); }
+  .screen .cap.past { color: var(--accent); }
+  .runs-h { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
+  .runs-h:first-child { margin-top: 0; }
+  .running .item.last { cursor: pointer; }
+  .running .item.last:hover { border-color: var(--accent); }
+  .running .item.last.on { border-color: var(--accent); background: var(--accent-soft); }
+  .res { font-weight: 650; font-size: 12px; white-space: nowrap; }
+  .res.SUCCESS { color: var(--ok); } .res.FAILURE, .res.UNSTABLE { color: var(--bad); } .res.ABORTED { color: var(--warn); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Live Runner</h1>
+    <p>Start a suite and watch it run: each test, each step with its locator, the browser's picture and the API calls behind it.</p>
+    <span class="pill idle" id="statusPill"><span class="dot"></span>Idle</span>
+  </header>
+
+  <div class="top">
+    <section class="card" aria-labelledby="run-title">
+      <div class="head"><h2 id="run-title">Run a suite</h2><span class="grow"></span><span class="hint" id="jobHint"></span></div>
+      <div class="body">
+        <div class="form">
+          <div class="field wide">
+            <label class="name" for="job">Job</label>
+            <select id="job"><option value="">Loading jobs…</option></select>
+          </div>
+        </div>
+        <div class="form" id="params" style="margin-top:10px"></div>
+        <div class="actions">
+          <button type="button" class="primary" id="run">Run</button>
+          <button type="button" id="runBoth" hidden>Run on Test and Stage</button>
+          <span class="hint" id="runNote"></span>
+        </div>
+        <div class="error" id="runError" hidden style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <section class="card now" aria-labelledby="now-title">
+      <div class="head"><h2 id="now-title">Runs</h2><span class="grow"></span><button type="button" class="small" id="refresh">Refresh</button></div>
+      <div class="body">
+        <div class="runs-h">Running now</div>
+        <div class="running" id="running"><span class="empty">Loading…</span></div>
+        <div class="runs-h">Last runs <span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">· click one to open it</span></div>
+        <div class="running" id="lastRuns"><span class="empty">Loading…</span></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" id="watch" hidden aria-live="polite">
+    <div class="bar">
+      <span class="title" id="bTitle"></span>
+      <span class="meta" id="bMeta"></span>
+      <div class="progress" id="bProgress" title=""></div>
+      <span class="counts" id="bCounts"></span>
+      <span class="meta" id="bTime"></span>
+      <span id="bLinks" class="meta"></span>
+    </div>
+  </section>
+
+  <div class="main" id="mainArea" hidden>
+      <section class="card">
+        <div class="head"><h2>Tests</h2><span class="grow"></span><button type="button" class="small on" id="follow" title="Keep the running test selected">Follow live</button></div>
+        <div class="tests" id="tests"></div>
+      </section>
+      <section class="card">
+        <div class="head"><h2 id="logTitle">Steps and network</h2><span class="grow"></span>
+          <span id="scopeBox" hidden><button type="button" class="small on" data-scope="test" title="Calls of the selected test">This test</button>
+          <button type="button" class="small" data-scope="run" title="Calls of every test of the build">Whole run</button> &nbsp;</span>
+          <button type="button" class="small on" data-flt="all">All</button>
+          <button type="button" class="small" data-flt="steps">Steps</button>
+          <button type="button" class="small" data-flt="net">Network</button>
+          <button type="button" class="small" data-flt="err">Problems</button>
+        </div>
+        <div class="error failbox" id="failBox" hidden></div>
+        <div class="log" id="log"></div>
+      </section>
+      <section class="card shot">
+        <div class="head"><h2 id="screenTitle">Browser</h2><span class="grow"></span><span class="hint" id="frameAge"></span>
+          <button type="button" class="small" id="playBtn" title="Play the selected test's recording">&#9654; Play</button>
+          <button type="button" class="small" id="backLive" hidden title="Show the running test again">Back to live</button></div>
+        <div class="screen">
+          <div class="ph" id="noFrame">Waiting for the first picture…</div>
+          <img id="frame" alt="The browser of the running test" hidden title="Click to see it full screen (Esc closes)">
+          <div class="cap" id="caption"></div>
+        </div>
+      </section>
+  </div>
+
+  <section class="card" id="consoleCard" hidden>
+    <details class="console" id="consoleBox"><summary>Console <span class="hint" id="consoleCount"></span></summary><pre class="console" id="console"></pre></details>
+  </section>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  // Jenkins root: this page is served under a job (HTML Publisher) or under /userContent/
+  var ROOT = (function () {
+    var p = location.pathname, i = p.indexOf('/job/'), u = p.indexOf('/userContent/');
+    return p.slice(0, i >= 0 ? i : (u >= 0 ? u : p.lastIndexOf('/')));
+  })();
+  var $ = function (id) { return document.getElementById(id); };
+  var MARK = '@@live ';
+  var CONSOLE_KEEP = 400;
+
+  window.addEventListener('error', function (ev) { showRunError('Page error: ' + (ev.message || ev.error)); });
+  if (window.top !== window.self) {
+    var open = document.createElement('a');
+    open.href = location.href; open.target = '_top'; open.textContent = 'Open as a full page';
+    open.className = 'pill idle'; open.style.textDecoration = 'none';
+    document.querySelector('header').appendChild(open);
+  }
+
+  function get(url, opts) { opts = opts || {}; opts.credentials = 'same-origin'; return fetch(url, opts); }
+  function json(url) { return get(url).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status + ' for ' + url); return r.json(); }); }
+  function crumb() {
+    return get(ROOT + '/crumbIssuer/api/json').then(function (r) {
+      if (r.status === 404) return {};
+      if (!r.ok) throw new Error('Not signed in to Jenkins (HTTP ' + r.status + ' from crumbIssuer)');
+      return r.json().then(function (j) { var h = {}; h[j.crumbRequestField] = j.crumb; return h; });
+    });
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  // Jenkins answers with its configured root URL, which may not be the host in use (a proxy or tunnel): keep only the path
+  function sameOrigin(url) { var u = new URL(url, location.href); return location.origin + u.pathname + u.search; }
+  // "now" on the agent's clock
+  function agentNow() { return Date.now() - (S && S.skew !== null ? S.skew : 0); }
+  function secs(ms) { ms = Math.max(0, ms || 0); return ms < 60000 ? (ms / 1000).toFixed(1) + ' s' : Math.floor(ms / 60000) + ' m ' + Math.round(ms % 60000 / 1000) + ' s'; }
+  function setStatus(kind, text) { $('statusPill').className = 'pill ' + kind; $('statusPill').innerHTML = '<span class="dot"></span>' + esc(text); }
+  function showRunError(text) { var e = $('runError'); e.textContent = text; e.hidden = !text; }
+
+  // ---------- jobs, parameters, run ----------
+  var jobs = [];
+  function loadJobs() {
+    var tree = 'jobs[name,url,_class,buildable,jobs[name,url,_class,buildable,jobs[name,url,_class,buildable]]]';
+    return json(ROOT + '/api/json?tree=' + tree).then(function (j) {
+      jobs = [];
+      (function walk(list, folder) {
+        (list || []).forEach(function (x) {
+          if (x.jobs) walk(x.jobs, folder ? folder + ' / ' + x.name : x.name);
+          else if (x.buildable !== false) jobs.push({ folder: folder || '', name: x.name, path: new URL(sameOrigin(x.url)).pathname.replace(/\/$/, '') });
+        });
+      })(j.jobs, '');
+      var sel = $('job'), groups = {};
+      sel.innerHTML = '';
+      jobs.forEach(function (x, i) {
+        var g = groups[x.folder];
+        if (!g) { g = groups[x.folder] = document.createElement('optgroup'); g.label = x.folder || 'Jobs'; sel.appendChild(g); }
+        var o = document.createElement('option'); o.value = String(i); o.textContent = x.name; g.appendChild(o);
+      });
+      var last = localStorageGet('liveRunner.job');
+      var keep = jobs.findIndex(function (x) { return x.path === last; });
+      sel.value = String(keep >= 0 ? keep : 0);
+      $('jobHint').textContent = jobs.length + ' jobs';
+      return loadParams();
+    }).catch(function (e) { $('job').innerHTML = '<option value="">Could not load the jobs</option>'; showRunError(e.message); });
+  }
+  function localStorageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function localStorageSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private window */ } }
+  function currentJob() { return jobs[+$('job').value]; }
+
+  var paramDefs = [];
+  function loadParams() {
+    var job = currentJob(), box = $('params');
+    box.innerHTML = ''; paramDefs = []; $('runBoth').hidden = true;
+    if (!job) return Promise.resolve();
+    localStorageSet('liveRunner.job', job.path);
+    var tree = 'property[parameterDefinitions[name,type,description,choices,defaultParameterValue[value]]]';
+    return json(job.path + '/api/json?tree=' + tree).then(function (j) {
+      (j.property || []).forEach(function (p) { (p.parameterDefinitions || []).forEach(function (d) { paramDefs.push(d); }); });
+      paramDefs.forEach(function (d) {
+        var id = 'p_' + d.name, def = d.defaultParameterValue ? d.defaultParameterValue.value : '';
+        var f = document.createElement('div'); f.className = 'field';
+        var html = '<label class="name" for="' + esc(id) + '">' + esc(d.name) + '</label>';
+        if (d.choices) {
+          html += '<select id="' + esc(id) + '">' + d.choices.map(function (c) { return '<option' + (c === def ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select>';
+        } else if (/Boolean/.test(d.type)) {
+          html += '<select id="' + esc(id) + '"><option' + (def ? ' selected' : '') + '>true</option><option' + (!def ? ' selected' : '') + '>false</option></select>';
+        } else if (/Password/.test(d.type)) {
+          html += '<input type="password" id="' + esc(id) + '" placeholder="empty = the job\'s default" autocomplete="new-password">';
+        } else {
+          html += '<input type="text" id="' + esc(id) + '" value="' + esc(def) + '" spellcheck="false" autocomplete="off">';
+        }
+        if (d.description) html += '<span class="hint">' + esc(d.description) + '</span>';
+        f.innerHTML = html; box.appendChild(f);
+      });
+      var env = paramDefs.find(function (d) { return d.name === 'ENV'; });
+      $('runBoth').hidden = !(env && env.choices && env.choices.indexOf('Test') >= 0 && env.choices.indexOf('Stage') >= 0);
+      $('runNote').textContent = paramDefs.length ? '' : 'This job has no parameters';
+    });
+  }
+  function paramValues(override) {
+    var v = {};
+    paramDefs.forEach(function (d) {
+      var el = $('p_' + d.name); if (!el) return;
+      var val = String(el.value);
+      if (/Password/.test(d.type) && !val) return; // the job's default
+      v[d.name] = val;
+    });
+    Object.keys(override || {}).forEach(function (k) { v[k] = override[k]; });
+    return v;
+  }
+  function trigger(job, params) {
+    return crumb().then(function (headers) {
+      var hasParams = Object.keys(params).length > 0;
+      return get(job.path + (hasParams ? '/buildWithParameters' : '/build'), { method: 'POST', headers: headers, body: hasParams ? new URLSearchParams(params) : null });
+    }).then(function (r) {
+      if (r.status === 403) throw new Error('Jenkins refused the build (HTTP 403) - sign in to Jenkins in this browser first');
+      if (!r.ok && r.status !== 201) throw new Error('Jenkins did not start the build: HTTP ' + r.status);
+      var queue = r.headers.get('Location');
+      if (!queue) throw new Error('Jenkins gave no queue item for the build');
+      return queue;
+    });
+  }
+  function waitForBuild(queueUrl) {
+    var api = sameOrigin(queueUrl).replace(/\/?$/, '/') + 'api/json';
+    return (function poll(n) {
+      return json(api).then(function (item) {
+        if (item.cancelled) throw new Error('The build was cancelled in the queue');
+        if (item.executable && item.executable.url) return sameOrigin(item.executable.url);
+        if (n > 900) throw new Error('Still queued after 15 minutes: ' + (item.why || ''));
+        setStatus('run', 'Queued' + (item.why ? ': ' + item.why : ''));
+        return sleep(1000).then(function () { return poll(n + 1); });
+      });
+    })(0);
+  }
+  function start(overrides) {
+    var job = currentJob(); if (!job) return;
+    showRunError('');
+    $('run').disabled = $('runBoth').disabled = true;
+    setStatus('run', 'Starting ' + job.name);
+    Promise.all(overrides.map(function (o) { return trigger(job, paramValues(o)); })).then(function (queues) {
+      // the first one is watched; the others show up under Running now
+      return waitForBuild(queues[0]);
+    }).then(function (buildUrl) {
+      loadRunning();
+      watch(buildUrl);
+    }).catch(function (e) { setStatus('bad', 'Not started'); showRunError(e.message); })
+      .then(function () { $('run').disabled = $('runBoth').disabled = false; });
+  }
+  $('job').addEventListener('change', function () { loadParams().catch(function (e) { showRunError(e.message); }); });
+  $('run').addEventListener('click', function () { start([{}]); });
+  $('runBoth').addEventListener('click', function () { start([{ ENV: 'Test' }, { ENV: 'Stage' }]); });
+
+  // ---------- running builds ----------
+  function loadRunning() {
+    var tree = 'computer[displayName,executors[currentExecutable[url,fullDisplayName,timestamp]],oneOffExecutors[currentExecutable[url,fullDisplayName,timestamp]]]';
+    return json(ROOT + '/computer/api/json?tree=' + tree).then(function (j) {
+      var list = [];
+      (j.computer || []).forEach(function (c) {
+        (c.executors || []).concat(c.oneOffExecutors || []).forEach(function (e) {
+          var x = e.currentExecutable;
+          if (x && x.url && x.fullDisplayName) list.push({ url: sameOrigin(x.url), name: x.fullDisplayName, node: c.displayName, ts: x.timestamp });
+        });
+      });
+      var box = $('running');
+      if (!list.length) { box.innerHTML = '<span class="empty">Nothing is running.</span>'; return; }
+      box.innerHTML = '';
+      list.forEach(function (b) {
+        var d = document.createElement('div'); d.className = 'item';
+        d.innerHTML = '<span class="what">' + esc(b.name) + ' <span class="hint">· ' + esc(b.node) + ' · ' + esc(secs(Date.now() - b.ts)) + '</span></span>';
+        var w = document.createElement('button'); w.type = 'button'; w.className = 'small'; w.textContent = watching === b.url ? 'Watching' : 'Watch';
+        w.disabled = watching === b.url;
+        w.addEventListener('click', function () { watch(b.url); loadRunning(); });
+        d.appendChild(w); box.appendChild(d);
+      });
+    }).catch(function (e) { $('running').innerHTML = '<span class="empty">' + esc(e.message) + '</span>'; });
+  }
+  // the newest finished builds of every job (the Live Runner's own job left out), newest first
+  function loadLastRuns() {
+    var b = 'builds[number,url,result,timestamp,duration,building,displayName]{0,8}';
+    var tree = 'jobs[name,url,' + b + ',jobs[name,url,' + b + ',jobs[name,url,' + b + ']]]';
+    return json(ROOT + '/api/json?tree=' + tree).then(function (j) {
+      var list = [];
+      (function walk(jobs, folder) {
+        (jobs || []).forEach(function (x) {
+          if (x.jobs) walk(x.jobs, folder ? folder + ' / ' + x.name : x.name);
+          if (!x.builds || x.name === 'liveRunner') return;
+          x.builds.forEach(function (r) {
+            if (!r.building) list.push({ url: sameOrigin(r.url), job: (folder ? folder + ' / ' : '') + x.name, name: r.displayName, result: r.result || '', ts: r.timestamp, dur: r.duration });
+          });
+        });
+      })(j.jobs, '');
+      list.sort(function (a, c) { return c.ts - a.ts; });
+      var box = $('lastRuns');
+      if (!list.length) { box.innerHTML = '<span class="empty">No finished runs yet.</span>'; return; }
+      box.innerHTML = '';
+      list.slice(0, 15).forEach(function (r) {
+        var d = document.createElement('div'); d.className = 'item last' + (watching === r.url ? ' on' : '');
+        d.title = 'Open this run: every test, step and call, and its recording';
+        d.innerHTML = '<span class="what">' + esc(r.job) + ' ' + esc(r.name) + ' <span class="hint">· ' + esc(new Date(r.ts).toLocaleString()) + ' · ' + esc(secs(r.dur)) + '</span></span>'
+          + '<span class="res ' + esc(r.result) + '">' + esc(r.result === 'SUCCESS' ? 'passed' : r.result === 'UNSTABLE' ? 'failed tests' : (r.result || '').toLowerCase()) + '</span>';
+        d.addEventListener('click', function () { watch(r.url); loadLastRuns(); });
+        box.appendChild(d);
+      });
+    }).catch(function (e) { $('lastRuns').innerHTML = '<span class="empty">' + esc(e.message) + '</span>'; });
+  }
+  $('refresh').addEventListener('click', function () { loadRunning(); loadLastRuns(); });
+  setInterval(function () { if (!document.hidden) loadLastRuns(); }, 30000);
+  setInterval(function () { if (!document.hidden) loadRunning(); }, 8000);
+
+  // ---------- watching a build ----------
+  var S, watching = null, watchId = 0;
+  function fresh() {
+    return { runs: [], tests: [], cur: null, sel: null, framesBase: '', frameAt: 0, lastStep: null, console: [], consoleTotal: 0, started: Date.now(), done: false, result: null, skew: null,
+      open: new Set(), ver: 0, idc: 0, kc: 0, byKey: {}, pin: null, live: null, reportOk: null, buildNo: 0, jobPath: '' };
+  }
+  function watch(buildUrl) {
+    var id = ++watchId;
+    stopPlay();
+    watching = buildUrl; S = fresh();
+    var bp = new URL(buildUrl).pathname.replace(/\/?$/, '');
+    S.buildNo = +bp.slice(bp.lastIndexOf('/') + 1); S.jobPath = bp.slice(0, bp.lastIndexOf('/'));
+    $('backLive').hidden = true; $('screenTitle').textContent = 'Browser';
+    try { history.replaceState(null, '', location.pathname + '?build=' + encodeURIComponent(new URL(buildUrl).pathname)); } catch (e) { /* file preview */ }
+    $('watch').hidden = $('mainArea').hidden = $('consoleCard').hidden = false;
+    // the panels fill the window below the build's bar
+    requestAnimationFrame(function () { $('watch').scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+    $('frame').hidden = true; $('noFrame').hidden = false; $('noFrame').textContent = 'Waiting for the first picture…';
+    $('caption').textContent = ''; $('frameAge').textContent = '';
+    $('bLinks').innerHTML = '<a href="' + esc(buildUrl) + '" target="_top">Build</a> · <a href="' + esc(buildUrl) + 'console" target="_top">Console</a>';
+    json(buildUrl + 'api/json?tree=fullDisplayName,number,timestamp,building,result,actions[parameters[name,value]]').then(function (b) {
+      if (id !== watchId) return;
+      S.started = b.timestamp || S.started;
+      $('bTitle').textContent = b.fullDisplayName;
+      var params = [];
+      (b.actions || []).forEach(function (a) { (a.parameters || []).forEach(function (p) { if (typeof p.value === 'string' && !/pass/i.test(p.name)) params.push(p.name + ' ' + p.value); }); });
+      $('bMeta').textContent = params.slice(0, 4).join(' · ');
+    }).catch(function () { /* the console still works */ });
+    setStatus('run', 'Running');
+    render();
+    var offset = 0, rest = '';
+    (function poll() {
+      if (id !== watchId) return;
+      get(buildUrl + 'logText/progressiveText?start=' + offset).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' reading the console');
+        var size = +r.headers.get('X-Text-Size'), more = r.headers.get('X-More-Data') === 'true';
+        return r.text().then(function (chunk) {
+          if (id !== watchId) return;
+          if (!isNaN(size)) offset = size;
+          var lines = (rest + chunk).split(/\r?\n/);
+          rest = more ? lines.pop() : '';
+          lines.forEach(line);
+          render();
+          if (more) return sleep(1000).then(poll);
+          return finish(buildUrl, id);
+        });
+      }).catch(function (e) { if (id === watchId) { setStatus('warn', 'Retrying: ' + e.message); sleep(3000).then(poll); } });
+    })();
+  }
+  function finish(buildUrl, id) {
+    return json(buildUrl + 'api/json?tree=result,duration').then(function (b) {
+      if (id !== watchId) return;
+      S.done = true; S.result = b.result; S.duration = b.duration;
+      checkReport().then(function () {
+        if (id !== watchId || S.pin || S.frameAt) return;
+        var web = S.tests.filter(function (x) { return x.shots; })[0];
+        if (web) { S.sel = web; follow = false; $('follow').classList.remove('on'); playTest(web); }
+      });
+      if (S.cur && S.cur.status === 'run') S.cur.status = 'skip';
+      setStatus(b.result === 'SUCCESS' ? 'ok' : b.result === 'UNSTABLE' || b.result === 'FAILURE' ? 'bad' : 'warn', 'Finished: ' + b.result);
+      render(); loadRunning(); loadLastRuns();
+    });
+  }
+
+  // one console line: a live event, or plain console text
+  function line(text) {
+    var i = text.indexOf(MARK);
+    if (i < 0) { S.console.push(text); S.consoleTotal++; if (S.console.length > CONSOLE_KEEP) S.console.shift(); return; }
+    var ev; try { ev = JSON.parse(text.slice(i + MARK.length)); } catch (e) { return; }
+    S.ver++;
+    if (ev.t === 'call' || ev.t === 'open') ev._id = ++S.idc;
+    ev._k = ++S.kc;
+    // the agent's clock against this browser's (plus the delay): the smallest difference seen is the best guess
+    if (ev.at) { var d = Date.now() - ev.at; if (S.skew === null || d < S.skew) S.skew = d; }
+    var t = S.cur;
+    switch (ev.t) {
+      case 'run':
+        S.runs.push({ suite: ev.suite, env: ev.env, browser: ev.browser, tests: ev.tests || 0 });
+        if (ev.frames) S.framesBase = ev.frames;
+        break;
+      case 'test':
+        if (t && t.status === 'run') t.status = 'skip';
+        t = S.cur = { n: ev.n, name: ev.name, block: ev.block, type: ev.type, status: 'run', msg: '', rows: [], at: ev.at, end: 0, run: S.runs.length - 1, calls: 0, bad: 0,
+          frames: [], shots: null };
+        S.tests.push(t);
+        if (follow || !S.sel) S.sel = t;
+        S.lastStep = null;
+        break;
+      case 'end':
+        if (t) { t.status = ev.status; t.msg = ev.msg; t.end = ev.at; }
+        break;
+      case 'step':
+        if (t) { t.rows.push(ev); S.byKey[ev._k] = t; S.lastStep = ev; }
+        break;
+      case 'check': case 'open': case 'console':
+        if (t) { t.rows.push(ev); S.byKey[ev._k] = t; }
+        break;
+      case 'call':
+        if (t) { t.rows.push(ev); S.byKey[ev._k] = t; t.calls++; if (ev.bad || ev.warn) t.bad++; }
+        break;
+      case 'frame':
+        if (t) t.frames.push({ f: ev.f, step: ev.step, at: ev.at });
+        showFrame(ev);
+        break;
+      case 'shots':
+        if (t) t.shots = { dir: ev.dir, steps: ev.steps || [] };
+        break;
+    }
+  }
+
+  function showFrame(ev) {
+    if (!S.framesBase) return;
+    var url = ROOT + S.framesBase.replace(/\/?$/, '/') + ev.f, img = new Image(), id = watchId, step = S.lastStep;
+    img.onload = function () {
+      if (id !== watchId) return;
+      S.frameAt = Date.now();
+      S.live = { url: url, caption: stepCaption(step) };
+      if (!S.pin) showLive();
+    };
+    img.src = url;
+  }
+  function stepCaption(s) {
+    return s ? '<b>Step ' + esc(s.n) + ' · ' + esc(s.a) + '</b> ' + element(s.e) + (s.l ? ' <small class="code">' + esc(s.l) + '</small>' : '') : '';
+  }
+  function showLive() {
+    stopPlay();
+    S.pin = null;
+    $('backLive').hidden = true; $('screenTitle').textContent = 'Browser'; $('caption').classList.remove('past');
+    if (S.live) { $('frame').src = S.live.url; $('frame').hidden = false; $('noFrame').hidden = true; $('caption').innerHTML = S.live.caption; }
+    lastLogKey = ''; render();
+  }
+  $('backLive').addEventListener('click', showLive);
+  $('playBtn').addEventListener('click', function () { if (player) stopPlay(); else if (S && S.sel) playTest(S.sel); });
+
+  // ---------- the picture full screen ----------
+  var zoom = null;
+  function openZoom() {
+    if (zoom || $('frame').hidden) return;
+    zoom = document.createElement('div'); zoom.className = 'zoom';
+    zoom.innerHTML = '<button type="button" aria-label="Close (Esc)" title="Close (Esc)">&#10005;</button><img alt=""><div class="zcap"></div>';
+    zoom.addEventListener('click', closeZoom);
+    document.body.appendChild(zoom);
+    syncZoom();
+  }
+  function closeZoom() { if (zoom) { zoom.remove(); zoom = null; } }
+  // follows the panel: new live pictures, or the step picked in the list
+  function syncZoom() {
+    if (!zoom) return;
+    var img = zoom.querySelector('img');
+    if (img.getAttribute('src') !== $('frame').getAttribute('src')) img.src = $('frame').getAttribute('src');
+    zoom.querySelector('.zcap').innerHTML = $('caption').innerHTML;
+  }
+  $('frame').addEventListener('click', openZoom);
+  $('frame').addEventListener('load', syncZoom);
+  new MutationObserver(syncZoom).observe($('caption'), { childList: true, subtree: true, characterData: true });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && zoom) { e.preventDefault(); closeZoom(); } });
+  setInterval(function () {
+    if (!S || !S.frameAt) return;
+    $('frameAge').textContent = S.pin ? (S.done ? '' : 'the run goes on') : S.done ? 'last picture of the run' : 'updated ' + secs(Date.now() - S.frameAt) + ' ago';
+  }, 1000);
+
+  // ---------- going back to a step: its picture in the Browser panel ----------
+  // the frame that shows step n: its own, else the last one before it (the report's recording works the same)
+  function frameOfStep(steps, n) {
+    var before = 0;
+    for (var i = 0; i < steps.length; i++) { if (steps[i] === n) return i; if (steps[i] < n) before = i; }
+    return before;
+  }
+  function stepAt(t, at) { var n = 0; t.rows.forEach(function (x) { if (x.t === 'step' && x.at <= at) n = x.n; }); return n; }
+  // the moment a row stands for: a step's own box; a call once it answered; anything else when it happened
+  function momentOf(ev) { return ev.t === 'call' || ev.t === 'open' ? (ev.sent || ev.at) + Math.max(ev.ms || 0, 0) : ev.at; }
+  function pictureUrls(t, ev) {
+    var urls = [], at = momentOf(ev), n = ev.t === 'step' ? ev.n : stepAt(t, at);
+    // while the build runs, its own live frames are all still there
+    if (!S.done && S.framesBase && t.frames.length) {
+      var f = ev.t === 'step' ? t.frames.filter(function (x) { return x.step === ev.n; })[0] : null;
+      if (!f) f = t.frames.filter(function (x) { return x.at >= at; })[0] || t.frames[t.frames.length - 1];
+      urls.push(ROOT + S.framesBase.replace(/\/?$/, '/') + f.f);
+    }
+    // once it is over, the recording in the report: this build's own copy (jobs that keep past reports), else
+    // the job's latest report - only while that still holds this build
+    if (S.done && t.shots && t.shots.steps.length) {
+      // a call: the frame after its step's, i.e. the page once it answered (a toast, a refreshed list)
+      var i = frameOfStep(t.shots.steps, n) + (ev.t === 'call' || ev.t === 'open' ? 1 : 0);
+      urls = urls.concat(shotUrls(t, Math.min(i, t.shots.steps.length - 1)));
+    }
+    return urls;
+  }
+  function shotUrls(t, i) {
+    var env = (S.runs[t.run] || {}).env === 'Stage' ? 'Stage_20Report' : 'Test_20Report';
+    var file = t.shots.dir + ('00' + i).slice(-3) + '.jpg', urls = [S.jobPath + '/' + S.buildNo + '/' + env + '/' + file];
+    if (S.reportOk) urls.push(S.jobPath + '/' + env + '/' + file);
+    return urls;
+  }
+  function loadFirst(urls, done, fail) {
+    (function next(i) {
+      if (i >= urls.length) { fail(); return; }
+      var img = new Image();
+      img.onload = function () { done(urls[i]); };
+      img.onerror = function () { next(i + 1); };
+      img.src = urls[i];
+    })(0);
+  }
+
+  // ---------- Play: a test's recording, frame by frame, like a video ----------
+  var player = null;
+  function stopPlay() {
+    if (player) { clearTimeout(player.timer); player = null; }
+    $('playBtn').textContent = '\u25B6 Play';
+  }
+  function playTest(t) {
+    stopPlay();
+    var frames = [];
+    if (S.done || !t.frames.length || t !== S.cur) {
+      if (t.shots) for (var i = 0; i < t.shots.steps.length; i++) frames.push({ urls: shotUrls(t, i), step: t.shots.steps[i] });
+    }
+    if (!frames.length) t.frames.forEach(function (x) { frames.push({ urls: [ROOT + S.framesBase.replace(/\/?$/, '/') + x.f], step: x.step }); });
+    if (!frames.length) { $('noFrame').hidden = false; $('frame').hidden = true; $('noFrame').textContent = 'No recording of this test to play.'; return; }
+    S.pin = { t: t, ev: null };
+    $('backLive').hidden = false; $('screenTitle').textContent = 'Browser · ' + t.n + '. ' + t.name; $('caption').classList.add('past');
+    var me = player = { i: 0, timer: 0 }, id = watchId, missing = 0;
+    $('playBtn').textContent = '\u275A\u275A Pause';
+    (function show() {
+      if (player !== me || id !== watchId) return;
+      if (me.i >= frames.length) { stopPlay(); return; }
+      var fr = frames[me.i], step = t.rows.filter(function (x) { return x.t === 'step' && x.n === fr.step; })[0];
+      loadFirst(fr.urls, function (u) {
+        if (player !== me) return;
+        $('frame').src = u; $('frame').hidden = false; $('noFrame').hidden = true;
+        $('caption').innerHTML = '<b>' + (me.i + 1) + ' / ' + frames.length + '</b> · ' + (step ? stepCaption(step) : 'before the first step');
+        me.i++; me.timer = setTimeout(show, 1000);
+      }, function () {
+        if (player !== me) return;
+        if (++missing === frames.length) {
+          stopPlay(); $('frame').hidden = true; $('noFrame').hidden = false;
+          $('noFrame').textContent = 'The recording of this run is not kept any more: its job keeps only the newest report of each env.';
+          return;
+        }
+        me.i++; me.timer = setTimeout(show, 50);
+      });
+    })();
+    lastLogKey = ''; render();
+  }
+  function rowCaption(ev) {
+    if (ev.t === 'step') return stepCaption(ev);
+    if (ev.t === 'check') return '<b>' + (ev.ok ? 'Check passed' : 'Check failed') + '</b> <bdi>' + esc(ev.d) + '</bdi>';
+    if (ev.t === 'call' || ev.t === 'open') return '<b>' + esc(ev.t === 'open' ? 'Page load' : ev.m) + ' <span class="code">' + esc(ev.p) + '</span> → ' + esc(httpText(ev)) + '</b> · the page right after';
+    return '<b>Console</b> ' + esc(ev.text || '');
+  }
+  function pin(t, ev) {
+    stopPlay();
+    S.pin = { t: t, ev: ev };
+    $('backLive').hidden = false;
+    $('screenTitle').textContent = 'Browser · ' + t.n + '. ' + t.name;
+    $('caption').classList.add('past'); $('caption').innerHTML = rowCaption(ev);
+    var urls = pictureUrls(t, ev), id = watchId, pinned = S.pin;
+    (function tryNext(i) {
+      if (S.pin !== pinned || id !== watchId) return;
+      if (i >= urls.length) {
+        $('frame').hidden = true; $('noFrame').hidden = false;
+        $('noFrame').textContent = t.type === 'API' ? 'API test - no browser to show.'
+          : S.done ? (S.reportOk === false ? 'No picture of that moment any more: the published report now holds a newer build of this job.' : 'No picture of that moment in this build.')
+          : 'No picture of that moment yet.';
+        return;
+      }
+      var img = new Image();
+      img.onload = function () { if (S.pin === pinned && id === watchId) { $('frame').src = urls[i]; $('frame').hidden = false; $('noFrame').hidden = true; } };
+      img.onerror = function () { tryNext(i + 1); };
+      img.src = urls[i];
+    })(0);
+    lastLogKey = ''; render();
+  }
+  // after the run: is the published report still this build's? (it holds the newest build of each env only)
+  function checkReport() {
+    var env = (S.runs[0] || {}).env, id = watchId;
+    return json(S.jobPath + '/api/json?tree=builds[number,building,actions[parameters[name,value]]]{0,20}').then(function (j) {
+      if (id !== watchId) return;
+      var newest = 0;
+      (j.builds || []).forEach(function (b) {
+        if (b.building) return;
+        var e = null;
+        (b.actions || []).forEach(function (a) { (a.parameters || []).forEach(function (p) { if (p.name === 'ENV') e = p.value; }); });
+        if ((e === null || !env || e === env) && b.number > newest) newest = b.number;
+      });
+      S.reportOk = newest === S.buildNo;
+    }).catch(function () { if (id === watchId) S.reportOk = false; });
+  }
+
+  function element(label) {
+    var m = /^(\S+)(?: "([\s\S]*)")?$/.exec(label || '');
+    if (!m) return '<bdi>' + esc(label) + '</bdi>';
+    return '<span class="tag">' + esc(m[1]) + '</span>' + (m[2] ? ' <bdi><b>' + esc(m[2]) + '</b></bdi>' : '');
+  }
+
+  // ---------- rendering ----------
+  var follow = true, filter = 'all', renderQueued = false;
+  $('follow').addEventListener('click', function () {
+    follow = !follow; this.classList.toggle('on', follow);
+    if (follow && S && S.cur) { S.sel = S.cur; if (S.pin) showLive(); render(); }
+  });
+  document.querySelectorAll('[data-flt]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      filter = b.dataset.flt;
+      document.querySelectorAll('[data-flt]').forEach(function (x) { x.classList.toggle('on', x === b); });
+      $('scopeBox').hidden = filter !== 'net';
+      render();
+    });
+  });
+  var scope = 'test';
+  document.querySelectorAll('[data-scope]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      scope = b.dataset.scope;
+      document.querySelectorAll('[data-scope]').forEach(function (x) { x.classList.toggle('on', x === b); });
+      render();
+    });
+  });
+  // a call opens and closes on click; reading or selecting inside its details does not close it
+  $('log').addEventListener('click', function (e) {
+    if (!S || e.target.closest('.det')) return;
+    var k = e.target.closest('[data-k]');
+    if (k && S.byKey[k.dataset.k]) {
+      var t = S.byKey[k.dataset.k], ev = t.rows.filter(function (x) { return String(x._k) === k.dataset.k; })[0];
+      if (ev) pin(t, ev);
+    }
+    var r = e.target.closest('[data-id]');
+    if (r) { var id = +r.dataset.id; if (S.open.has(id)) S.open.delete(id); else S.open.add(id); }
+    lastLogKey = ''; draw();
+  });
+  function render() {
+    if (renderQueued) return; renderQueued = true;
+    // a timer, not requestAnimationFrame: that one stops while the tab is hidden, and the page must keep up
+    setTimeout(function () { renderQueued = false; draw(); }, 60);
+  }
+  function draw() {
+    if (!S) return;
+    var total = S.runs.reduce(function (a, r) { return a + r.tests; }, 0);
+    var c = { pass: 0, fail: 0, skip: 0 };
+    S.tests.forEach(function (t) { if (c[t.status] !== undefined) c[t.status]++; });
+    var done = c.pass + c.fail + c.skip, denom = Math.max(total, S.tests.length, 1);
+    $('bProgress').innerHTML = '<i class="p" style="width:' + (100 * c.pass / denom) + '%"></i><i class="f" style="width:' + (100 * c.fail / denom) + '%"></i><i class="s" style="width:' + (100 * c.skip / denom) + '%"></i>';
+    $('bProgress').title = done + ' of ' + (total || '?') + ' tests done';
+    $('bCounts').innerHTML = done + ' / ' + (total || '?') + ' · <b class="p">' + c.pass + ' passed</b> · <b class="f">' + c.fail + ' failed</b>' + (c.skip ? ' · <b class="s">' + c.skip + ' skipped</b>' : '');
+    $('bTime').textContent = S.done ? secs(S.duration) : secs(agentNow() - S.started);
+    if (!S.done && S.cur) setStatus('run', 'Running ' + S.cur.n + '. ' + S.cur.name);
+    // until the first picture arrives, say why there is none yet
+    if (!S.frameAt) $('noFrame').textContent = S.runs.length && !S.framesBase ? 'No live picture for this build (no workspace to serve it from). Steps and network still come through.'
+      : S.done ? 'No picture was sent in this build.'
+      : S.cur && S.cur.type === 'API' ? 'API test - no browser to show.'
+      : 'Waiting for the first picture…';
+    drawTests(); drawLog();
+    var box = $('console');
+    $('consoleCount').textContent = '(' + S.consoleTotal + ' lines' + (S.consoleTotal > CONSOLE_KEEP ? ', last ' + CONSOLE_KEEP + ' shown' : '') + ')';
+    if ($('consoleBox').open) { var atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 20; box.textContent = S.console.join('\n'); if (atEnd) box.scrollTop = box.scrollHeight; }
+  }
+  $('consoleBox').addEventListener('toggle', draw);
+  function icon(t) {
+    return t.status === 'run' ? '<span class="ic run"><span class="spin"></span></span>' : '<span class="ic ' + t.status + '">' + ({ pass: '&#10003;', fail: '&#10007;', skip: '&#8211;' }[t.status] || '') + '</span>';
+  }
+  function drawTests() {
+    var box = $('tests'), html = '', lastRun = -1;
+    S.tests.forEach(function (t, i) {
+      if (t.run !== lastRun && S.runs.length > 1 && S.runs[t.run]) { var r = S.runs[t.run]; html += '<div class="suite-h">' + esc(r.suite + ' · ' + r.env) + '</div>'; }
+      lastRun = t.run;
+      var time = t.end ? secs(t.end - t.at) : (t.status === 'run' && !S.done ? secs(agentNow() - t.at) : '');
+      html += '<div class="t' + (t === S.sel ? ' sel' : '') + '" data-i="' + i + '">' + icon(t)
+        + '<span class="nm">' + esc(t.n + '. ' + t.name) + '<small>' + esc(t.block || '') + ' · ' + esc(t.type) + (t.calls ? ' · ' + t.calls + ' calls' : '') + (t.bad ? ' · ' + t.bad + ' failed' : '') + '</small></span>'
+        + '<span class="tm">' + esc(time) + '</span></div>';
+    });
+    if (!S.tests.length) html = '<div class="t"><span class="nm hint">' + (S.done ? 'No live events in this build - it ran before the live feed existed, or ran with -Dlive=off.' : 'Waiting for the first test…') + '</span></div>';
+    var y = box.scrollTop; box.innerHTML = html; box.scrollTop = y;
+    if (follow && S.sel) { var el = box.querySelector('.t.sel'); if (el && (el.offsetTop < box.scrollTop || el.offsetTop > box.scrollTop + box.clientHeight - 40)) el.scrollIntoView({ block: 'nearest' }); }
+  }
+  $('tests').addEventListener('click', function (e) {
+    var el = e.target.closest('.t[data-i]'); if (!el) return;
+    S.sel = S.tests[+el.dataset.i];
+    if (S.sel !== S.cur && follow) { follow = false; $('follow').classList.remove('on'); }
+    draw();
+  });
+  // when a row happened: a call when it was sent, anything else when it was written
+  function when(ev) { return ev.sent || ev.at; }
+  function httpText(ev) {
+    if (ev.err) return ev.err.replace(/^net::/, '');
+    return ev.s ? String(ev.s) : 'no answer yet';
+  }
+  function httpClass(ev) { return ev.bad ? 'bad' : ev.warn ? 'warn' : ev.s ? 'ok' : 'off'; }
+  function serverText(ev) { return ev.ss === true ? 'true' : ev.ss === false ? 'false' : ev.t === 'call' ? '-' : ''; }
+  function prettyBody(text) { if (!text) return ''; try { return JSON.stringify(JSON.parse(text), null, 2); } catch (e) { return text; } }
+  function stepBefore(t, ev) { var s = null; t.rows.forEach(function (x) { if (x.t === 'step' && x.at <= when(ev)) s = x; }); return s; }
+  // everything about one call: what the DevTools Network tab shows when a request is clicked
+  function details(t, ev, cls) {
+    var s = stepBefore(t, ev);
+    return '<div class="det' + (cls ? ' ' + cls : '') + '">'
+      + '<div><b>' + esc(ev.t === 'open' ? 'Page load' : ev.m) + '</b> <span class="code">' + esc(ev.url || ev.p) + '</span></div>'
+      + '<div class="kv2">'
+      + '<span>HTTP status</span><b class="st ' + httpClass(ev) + '">' + esc(httpText(ev)) + '</b>'
+      + (ev.t === 'call' ? '<span>Server Status</span><b class="st ' + (ev.ss === false ? 'warn' : ev.ss === true ? 'ok' : 'off') + '">' + esc(serverText(ev)) + '</b>' : '')
+      + '<span>Server message</span><bdi>' + (ev.msg ? esc(ev.msg) : '<span class="hint">none</span>') + '</bdi>'
+      + '<span>Time</span><span>' + (ev.ms != null && ev.ms >= 0 ? esc(ev.ms) + ' ms' : '-') + '</span>'
+      + '<span>Sent</span><span>' + esc(secs(when(ev) - t.at)) + ' into the test (' + esc(t.n + '. ' + t.name) + ')</span>'
+      + '<span>After step</span><span>' + (s ? esc(s.n + ' ' + s.a) + ' ' + element(s.e) + (s.l ? ' <span class="code">' + esc(s.l) + '</span>' : '') : 'before the first step') + '</span>'
+      + '<span>Made by</span><span>' + (ev.api ? 'the test\'s API client' : 'the page, in the browser') + '</span>'
+      + '</div>'
+      + (ev.req ? '<div class="k">Request</div><pre>' + esc(prettyBody(ev.req)) + '</pre>' : '')
+      + (ev.res ? '<div class="k">Response</div><pre>' + esc(prettyBody(ev.res)) + '</pre>'
+        : ev.t === 'call' ? '<div class="k">Response</div><div class="hint">' + (ev.url ? 'No text response, or the page moved on before it was read.' : 'Not in this build\'s feed - it ran before the Network details were added.') + '</div>' : '')
+      + '</div>';
+  }
+  function drawNetwork(box) {
+    var tests = scope === 'run' ? S.tests : (S.sel ? [S.sel] : []), list = [];
+    tests.forEach(function (t) { t.rows.forEach(function (ev) { if (ev.t === 'call' || ev.t === 'open') list.push({ t: t, ev: ev }); }); });
+    list.sort(function (a, b) { return when(a.ev) - when(b.ev); });
+    var bad = 0, warn = 0, waiting = 0, slow = null;
+    list.forEach(function (x) {
+      if (x.ev.bad) bad++; else if (x.ev.warn) warn++;
+      if (!x.ev.s && !x.ev.err) waiting++;
+      if (x.ev.ms != null && (!slow || x.ev.ms > slow.ev.ms)) slow = x;
+    });
+    var cols = scope === 'run' ? 8 : 7;
+    var html = '<div class="netsum">' + list.length + ' calls' + (bad ? ' · <b class="bad">' + bad + ' failed</b>' : '')
+      + (warn ? ' · <b class="warn">' + warn + ' Status false</b>' : '') + (waiting ? ' · ' + waiting + ' no answer yet' : '')
+      + (slow ? ' · slowest ' + esc(slow.ev.t === 'open' ? 'page load' : slow.ev.m) + ' <span class="code">' + esc(slow.ev.p) + '</span> ' + esc(slow.ev.ms) + ' ms' : '')
+      + ' · click a row for its details</div>'
+      + '<table class="nt"><thead><tr><th>#</th>' + (scope === 'run' ? '<th>Test</th>' : '')
+      + '<th>Method</th><th>Path · message</th><th>HTTP</th><th>Status</th><th>Time</th><th>Sent</th></tr></thead><tbody>';
+    list.forEach(function (x, i) {
+      var ev = x.ev, opened = S.open.has(ev._id);
+      html += '<tr class="nr ' + (ev.bad ? 'bad' : ev.warn ? 'warn' : '') + (opened ? ' opened' : '') + pinnedClass(ev) + '" data-id="' + ev._id + '" data-k="' + ev._k + '">'
+        + '<td class="num">' + (i + 1) + '</td>' + (scope === 'run' ? '<td class="num">' + esc(x.t.n) + '</td>' : '')
+        + '<td>' + esc(ev.t === 'open' ? 'open' : ev.m) + (ev.api ? ' <span class="tag">API</span>' : '') + '</td>'
+        + '<td class="path"><span class="code">' + esc(ev.p) + '</span>' + (ev.msg ? '<span class="msg st ' + (ev.bad ? 'bad' : ev.warn ? 'warn' : 'off') + '"><bdi>' + esc(ev.msg) + '</bdi></span>' : '') + '</td>'
+        + '<td class="st ' + httpClass(ev) + '">' + esc(httpText(ev)) + '</td>'
+        + '<td class="st ' + (ev.ss === false ? 'warn' : ev.ss === true ? 'ok' : 'off') + '">' + esc(serverText(ev)) + '</td>'
+        + '<td class="num">' + (ev.ms != null && ev.ms >= 0 ? esc(ev.ms) + ' ms' : '') + '</td>'
+        + '<td class="num">' + esc(secs(when(ev) - x.t.at)) + '</td></tr>';
+      if (opened) html += '<tr class="dr"><td colspan="' + cols + '">' + details(x.t, ev) + '</td></tr>';
+    });
+    box.innerHTML = list.length ? html + '</tbody></table>' : '<div class="r"><span class="m hint">No calls yet.</span></div>';
+  }
+  var lastLogKey = '';
+  // S.pin.ev is null while a whole test's recording plays (Play) - only a clicked row has one
+  function pinnedClass(ev) { return S.pin && S.pin.ev && S.pin.ev === ev ? ' pinned' : ''; }
+  function drawLog() {
+    var t = S.sel, box = $('log');
+    $('logTitle').textContent = filter === 'net' && scope === 'run' ? 'Network · whole run' : t ? (filter === 'net' ? 'Network · ' : 'Steps and network · ') + t.n + '. ' + t.name : 'Steps and network';
+    var fb = $('failBox');
+    if (t && (t.status === 'fail' || t.status === 'skip') && t.msg) { fb.hidden = false; fb.textContent = (t.status === 'fail' ? 'Failed: ' : 'Skipped: ') + t.msg; } else fb.hidden = true;
+    // drawn again only when something changed, so an opened call can be read and copied in peace
+    var key = [S.ver, filter, scope, S.tests.indexOf(t), Array.from(S.open).join(','), S.pin && S.pin.ev ? S.pin.ev._k : ''].join('|');
+    if (key === lastLogKey) return;
+    lastLogKey = key;
+    var y = box.scrollTop, atEnd = y + box.clientHeight >= box.scrollHeight - 30;
+    if (filter === 'net') { drawNetwork(box); box.scrollTop = atEnd && t === S.cur ? box.scrollHeight : y; return; }
+    if (!t) { box.innerHTML = ''; return; }
+    var html = '';
+    t.rows.slice().sort(function (a, b) { return when(a) - when(b); }).forEach(function (ev) {
+      var tm = '<span class="tm">' + esc(secs(when(ev) - t.at)) + '</span>';
+      if (ev.t === 'step') {
+        if (filter === 'err') return;
+        html += '<div class="r' + pinnedClass(ev) + '" data-k="' + ev._k + '" title="Click to see this step in the Browser panel"><span class="no">' + esc(ev.n) + '</span><span class="a">' + esc(ev.a) + '</span><span class="m"><span>' + element(ev.e) + '</span>'
+          + '<span class="l2">' + (ev.l ? '<span class="code">' + esc(ev.l) + '</span> ' : '') + esc(ev.c || '') + '</span></span>' + tm + '</div>';
+      } else if (ev.t === 'check') {
+        if (filter === 'err' && ev.ok) return;
+        html += '<div class="r chk' + (ev.ok ? '' : ' bad') + pinnedClass(ev) + '" data-k="' + ev._k + '"><span class="no">' + (ev.ok ? '&#10003;' : '&#10007;') + '</span><span class="a">assert</span><span class="m"><bdi>' + esc(ev.d) + '</bdi><span class="l2">' + esc(ev.c || '') + '</span></span>' + tm + '</div>';
+      } else if (ev.t === 'call' || ev.t === 'open') {
+        var bad = ev.bad, warn = ev.warn;
+        if (filter === 'steps' || (filter === 'err' && !bad && !warn)) return;
+        var st = httpText(ev) + (ev.ss === true || ev.ss === false ? ' · Status ' + ev.ss : '');
+        html += '<div class="r net clk' + (ev.t === 'open' ? ' open' : '') + (bad ? ' bad' : warn ? ' warn' : '') + pinnedClass(ev) + '" data-id="' + ev._id + '" data-k="' + ev._k + '" title="Click for the request and response, and the page right after">'
+          + '<span class="a">' + esc(ev.t === 'open' ? 'open' : ev.m) + '</span>'
+          + '<span class="m"><span class="code">' + esc(ev.p) + '</span>' + (ev.msg && (bad || warn) ? '<span class="l2"><bdi>' + esc(ev.msg) + '</bdi></span>' : '') + '</span>'
+          + '<span class="st ' + (bad ? 'bad' : warn ? 'warn' : ev.s ? '' : 'off') + '">' + esc(st) + '</span>'
+          + (ev.ms != null && ev.ms >= 0 ? '<span class="tm">' + esc(ev.ms) + ' ms</span>' : '') + (ev.api ? '<span class="tm">API client</span>' : '') + tm + '</div>';
+        if (S.open.has(ev._id)) html += details(t, ev, 'inrow');
+      } else if (ev.t === 'console') {
+        if (filter === 'steps') return;
+        html += '<div class="r bad' + pinnedClass(ev) + '" data-k="' + ev._k + '"><span class="no">!</span><span class="a">console</span><span class="m"><span class="code">' + esc(ev.text) + '</span></span>' + tm + '</div>';
+      }
+    });
+    box.innerHTML = html || '<div class="r"><span class="m hint">' + (t.status === 'run' ? 'Nothing yet…' : 'Nothing to show for this filter.') + '</span></div>';
+    box.scrollTop = atEnd && t === S.cur ? box.scrollHeight : y;
+  }
+  setInterval(function () { if (S && !S.done) render(); }, 1000);
+
+  // ---------- start ----------
+  loadJobs();
+  loadRunning();
+  loadLastRuns();
+  var asked = new URLSearchParams(location.search).get('build');
+  if (asked) watch(location.origin + asked.replace(/\/?$/, '/'));
+})();
+</script>
+</body>
+</html>

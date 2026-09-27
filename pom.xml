@@ -4,15 +4,18 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.spring-boot</groupId>
-    <artifactId>Automation_Framework</artifactId>
+    <groupId>com.automation</groupId>
+    <artifactId>automation-framework</artifactId>
     <version>1.0-SNAPSHOT</version>
 
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <testng></testng>
+        <!-- mvn test -Dtestng=web/webSmoke -DserverType=Stage -DbrowserType=headlessChrome -->
+        <testng>web/webSmoke</testng>
+        <browserType></browserType>
+        <serverType></serverType>
     </properties>
 
     <build>
@@ -22,8 +25,11 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.4</version>
                 <configuration>
+                    <!-- Java 17 on Windows defaults to windows-1252: Arabic in the Extent reports and the
+                         console came out as "????" -->
+                    <argLine>-Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8</argLine>
                     <suiteXmlFiles>
-                        <suiteXmlFile>${testng}.xml</suiteXmlFile>
+                        <suiteXmlFile>suiteFiles/${testng}.xml</suiteXmlFile>
                     </suiteXmlFiles>
                 </configuration>
             </plugin>
@@ -31,11 +37,6 @@
     </build>
 
     <dependencies>
-        <dependency>
-            <groupId>com.github.stephenc.monte</groupId>
-            <artifactId>monte-screen-recorder</artifactId>
-            <version>0.7.7.0</version>
-        </dependency>
         <dependency>
             <groupId>org.testng</groupId>
             <artifactId>testng</artifactId>
@@ -49,7 +50,7 @@
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
-            <version>4.40.0</version>
+            <version>4.43.0</version>
         </dependency>
         <dependency>
             <groupId>com.google.code.gson</groupId>
@@ -78,6 +79,30 @@
             <artifactId>json-schema-validator</artifactId>
             <version>5.5.6</version>
             <scope>test</scope>
+            <exclusions>
+                <!-- old javax.mail: its mailcap loads javax handlers into angus-mail -> NoClassDefFoundError javax/activation -->
+                <exclusion>
+                    <groupId>com.sun.mail</groupId>
+                    <artifactId>mailapi</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.5.6</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.38</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+            <version>2.0.3</version>
         </dependency>
     </dependencies>
 

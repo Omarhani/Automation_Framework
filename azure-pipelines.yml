@@ -1,0 +1,62 @@
+# Azure DevOps pipeline: pick the suite, env and browser from "Run pipeline"; pass/fail shows in the run's
+# Tests tab and the Extent report is attached to the run as an artifact.
+trigger: none
+
+parameters:
+- name: suite
+  displayName: Suite file (suiteFiles/<suite>.xml)
+  type: string
+  default: web/webSmoke
+  values:
+  - web/webSmoke
+  - web/webRegression
+  - mob/mobSmoke
+  - mob/mobRegression
+  - api/apiSmoke
+  - hybrid/hybridSmoke
+- name: env
+  displayName: Environment (a key of ENVIRONMENTS in data/testData.json)
+  type: string
+  default: Test
+  values:
+  - Test
+  - Stage
+- name: browser
+  displayName: Browser
+  type: string
+  default: headlessChrome
+  values:
+  - chrome
+  - edge
+  - headlessChrome
+  - headlessEdge
+
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+pool:
+  name: Default        # your self-hosted agent pool (Chrome / Edge installed; Appium + adb for mobile suites)
+
+steps:
+# A self-hosted agent keeps its workspace between runs - clear the last run's report so the artifact holds this run only.
+- powershell: if (Test-Path report) { Remove-Item report -Recurse -Force }
+  displayName: Clear previous report
+
+- task: Maven@3
+  inputs:
+    mavenPomFile: 'pom.xml'
+    mavenOptions: '-Xmx3072m'
+    javaHomeOption: 'JDKVersion'
+    jdkVersionOption: '1.17'
+    jdkArchitectureOption: 'x64'
+    publishJUnitResults: true
+    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    testRunTitle: '${{ parameters.suite }} on ${{ parameters.env }} (${{ parameters.browser }})'
+    goals: 'test -Dtestng=${{ parameters.suite }} -DserverType=${{ parameters.env }} -DbrowserType=${{ parameters.browser }}'
+
+# always(): a failed run is the one the team most needs to open.
+- task: PublishPipelineArtifact@1
+  displayName: Publish Extent report
+  condition: always()
+  inputs:
+    targetPath: 'report'
+    artifact: 'Extent report'

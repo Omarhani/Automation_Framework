@@ -5,13 +5,14 @@ target/
 .kotlin
 
 ### IntelliJ IDEA ###
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/compiler.xml
-.idea/libraries/
+# Ignore all per-user IDE state; share only VCS mapping and file encodings
+.idea/*
+!.idea/vcs.xml
+!.idea/encodings.xml
 *.iws
 *.iml
 *.ipr
+
 
 ### Eclipse ###
 .apt_generated
@@ -37,3 +38,18 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+*.png
+*.avi
+
+### Test run output (regenerated on every run) ###
+report/
+# Live Runner pictures of a running Jenkins build (utils.LiveFeed; removed when the run ends)
+/live/
+
+### Claude skills inbox (temporary; sync-skills.ps1 moves it into .claude/skills and deletes it) ###
+skills-sync/
+### Rolling run dates (rewritten by every run; each machine keeps its own) ###
+data/testDate.txt
+data/workDate.txt
+data/workDate-*.txt

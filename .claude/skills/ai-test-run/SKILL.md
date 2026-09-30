@@ -45,6 +45,13 @@ Rules:
 - **Reset state between cases** where the case changed something, or declare the dependency in the report.
 - **Screenshot only on FAIL** or when the user asks. Screenshots are expensive; DOM checks are cheap.
 - If a case cannot start because its precondition is missing, that is **SKIPPED**, not FAIL.
+- **Set-up and clean-up go through the API, not through clicks** (the **automation-framework** rule; recipes in
+  **api-catalog**). Before the first step, make the case's preconditions true with the API: the project's
+  create-by-API utility for the user (it prints what it created), a scratch suite of set-up blocks for anything else.
+  After the last case, remove it the same way, then check through a list call that nothing with the run's tag is
+  left. The recorded browser steps are only the case's own steps; set-up and clean-up go into the report as
+  `Setup - … -` / `Clean up - … -` items with the call that was made and its answer. A precondition that has no API yet
+  is set by hand **only** after saying so in the report, and it is a gap to add to the catalog.
 
 ### Step log: status + timestamp (every step, every test case)
 

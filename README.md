@@ -116,6 +116,9 @@ src/test/java/
 src/test/resources/schemas ← JSON schemas to check API responses
 suiteFiles/                ← web/ mob/ api/ hybrid/ suite XML files
 jenkins/                   ← Jenkins pages (Live Runner, Run Job) and the run report script
+bugcycle/                  ← run suite groups with retries, retest filed bugs, move them in the tracker
+testingActivity/           ← story.js: reads a user story and its tickets for the testing-activity skill
+.claude/skills, .claude/agents ← what Claude Code knows about this framework (see the end of this file)
 report/                    ← created by each run
 ```
 
@@ -462,7 +465,10 @@ Helpers you call inside pages (`MethodHandlesWeb`): `click`, `sendKeys`, `getTex
 `scrollIntoView`, `acceptAlert`, `waitForToaster`, `openPage` … and in screens (`MethodHandlesMobile`):
 `click`, `clickOnce`, `sendKeys`, `isDisplayed`, `isPresent`, `scrollAndClick`, `scrollIntoViewWithin`,
 `hideKeyboardIfShown`, `restartApp`, `getToasterMessage` …
-Checks: `myAssertEquals`, `myAssertTrue`, `myAssertFalse` (they also appear as steps in the report).
+Assertions: `myAssertEquals(name, actual, expected)`, `myAssertContains`, `myAssertTrue(name, ...)`, `myAssertFalse`,
+and `softly(title, () -> {...})` for a group that reports every field before it fails. Give each one a name
+(`"Order details · total"`): the report shows a numbered table per assertion with expected / actual and a hint about
+where two texts differ, and the run report names the failed assertion.
 
 ---
 
@@ -494,7 +500,30 @@ to the run.
 
 ---
 
-## Claude Code skills
+## Claude Code skills and agents
 
-`.claude/skills/` teaches Claude Code this framework: adding pages / tests / suites, writing stable XPath
-locators, running a manual AI test pass with a report, and a template to describe your app.
+`.claude/skills/` and `.claude/agents/` teach Claude Code how to work in this framework. They hold **no project
+data**: the places marked `<...>` are templates you fill in for your app.
+
+| Skill | What it is for |
+|---|---|
+| `automation-framework` | the framework itself: layout, lifecycle, helpers, named assertions, suites, data, reports, CI - and the house rules: every test case is **set-up by API → test → clean-up by API**, delete only what the run created, branch → run → pull request → CI → report |
+| `app-testing` | *template*: your app's map - environments, login, pages, locators, quirks, accounts |
+| `business-knowledge` | *template*: your app's business rules per module, plus a log of the stories handled |
+| `api-catalog` | *template*: every API call set-up and clean-up can use, marked verified / seen / read from the app / unknown; `tools/web-api-scan.js` builds the list from a web app's own script |
+| `xpath-locators` | writing and verifying stable locators |
+| `ai-test-run` | running test cases by hand in the browser with a timed report |
+| `testing-activity` | one user story end to end: read it and its tickets, walk it, write and run the test cases, automate, deliver |
+| `suite-bug-cycle` | run a suite group with retries, confirm real bugs, retest them after the fix and move them in the tracker |
+| `automation-bug-report` | turning a red run into a developer-ready bug - filed only after you say yes |
+
+| Agent | What it does |
+|---|---|
+| `create-test-case` | builds one test case as set-up → test → clean-up, verifying any API call it needs first |
+| `testing-activity` | runs the testing-activity procedure for one story |
+| `suite-bug-runner` | runs a suite group (or retests bugs) in the background and returns the report |
+
+Tools they use: `jenkins/run-report.js` (the per-block result table), `bugcycle/*.js` (fill
+`bugcycle/config.json` with your tracker and the states that mean "fixed on this env"), `testingActivity/story.js`.
+The tracker code is for Azure DevOps and uses the login git already has; for another tracker re-implement
+`bugcycle/ado.js`.

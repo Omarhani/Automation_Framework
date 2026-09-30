@@ -1,0 +1,20 @@
+{
+  "_comment": "Suite groups for bugcycle/run-group.js - paths are suiteFiles/<path>.xml without .xml; \"@name\" pulls another group in. Leave out utility suites (create / delete data on demand) and the *Regression suites (they include the others). Mobile and hybrid suites need the phone.",
+  "smoke": [
+    "api/apiSmoke",
+    "web/webSmoke"
+  ],
+  "api": [
+    "api/apiSmoke"
+  ],
+  "web": [
+    "web/webSmoke"
+  ],
+  "mobile": [
+    "mob/mobSmoke"
+  ],
+  "hybrid": [
+    "hybrid/hybridSmoke"
+  ],
+  "all": ["@api", "@web", "@mobile", "@hybrid"]
+}

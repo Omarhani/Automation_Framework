@@ -1,0 +1,39 @@
+{
+  "_comment": "Settings of the suite -> bug -> retest cycle (see .claude/skills/suite-bug-cycle/SKILL.md). Fill the <...> values for your project; nothing here is a secret - the tracker login is the one git already has.",
+  "retries": 3,
+  "browserType": "headlessChrome",
+  "defaultEnvs": ["Test"],
+  "mvnArgs": [],
+
+  "_phone_comment": "Suites matching phoneSuites drive the phone: they run one at a time and wait while appiumPort is in use.",
+  "phoneSuites": "^(mob|hybrid)/",
+  "appiumPort": 4723,
+
+  "_failure_comment": "knockOnPattern: messages that mean 'an earlier block failed, nothing to work on' (RunContext.get's message is the default). envIssuePattern: the machine or the run's set-up, never a product bug. volatilePatterns: generated values (the run's own user names, stamps) replaced before failures of two attempts are compared.",
+  "knockOnPattern": "Nothing saved as \".*\" in this run",
+  "envIssuePattern": "MAIL_APP_PASSWORD is not set|EADDRINUSE|instrumentation process is not running|Could not start a new session|session not created|Timed out receiving message from renderer",
+  "volatilePatterns": [],
+
+  "_leftovers_comment": "Console lines your set-up and clean-up blocks print, as regexes with the item's id / name in group 1 - e.g. created 'Created user by API: (\\S+)', deleted 'Deleted user by API: (\\S+)'. cleanup = how to remove a leftover, shown in the summary. Empty = not tracked.",
+  "leftovers": { "created": "", "deleted": "", "cleanup": "" },
+
+  "_tracker_comment": "bugcycle/ado.js implements Azure DevOps. org = the API base, e.g. https://dev.azure.com/<organisation> ; assignTo = who receives bugs filed from automation; tags = the tag that marks them.",
+  "tracker": {
+    "type": "azure-devops",
+    "org": "<https://dev.azure.com/your-organisation>",
+    "project": "<project>",
+    "assignTo": "<developer or triage owner>",
+    "areaPath": "<area path>",
+    "tags": "Automation",
+    "bugType": "Bug",
+    "storyTypes": ["User Story", "Bug"],
+    "environmentField": { "Test": "<value of the tracker's environment field for Test>", "Stage": "<... for Stage>" }
+  },
+
+  "_retest_comment": "Which env a bug is retested on, from its tracker state (the states that mean 'the fix is deployed on <env>'); a pass moves it to 'to'. A failed retest never moves a bug by itself - a person decides.",
+  "retest": [
+    { "states": ["<state: fix is on Test>"], "env": "Test", "to": "<next state>" },
+    { "states": ["<state: fix is on Stage>"], "env": "Stage", "to": "<next state>" }
+  ],
+  "failedRetestProposal": "<state to propose for a bug that is still failing, e.g. Reopened>"
+}

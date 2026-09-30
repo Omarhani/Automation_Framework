@@ -53,3 +53,9 @@ skills-sync/
 data/testDate.txt
 data/workDate.txt
 data/workDate-*.txt
+
+# bugcycle run folders (logs, results, screenshots)
+bugcycle/runs/
+
+# Testing Activity: attachments downloaded from the tracker (story.md and the analysis files are committed)
+testingActivity/stories/*/attachments/

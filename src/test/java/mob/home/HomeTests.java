@@ -13,6 +13,6 @@ public class HomeTests extends BaseTests {
 
     @Test(groups = "Mob")
     public void verifyThatTheAppOpens() {
-        myAssertEquals(androidDriver.getCurrentPackage(), mobile().APP_PACKAGE);
+        myAssertEquals("App in front · package", androidDriver.getCurrentPackage(), mobile().APP_PACKAGE);
     }
 }

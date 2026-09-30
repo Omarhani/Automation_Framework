@@ -22,6 +22,6 @@ public class HealthApiTests extends BaseApi {
     public void verifyThatTheApiAnswers(@Optional("") String healthPath) {
         Response response = given(SpecFactory.getSpec(healthPath.startsWith("${") ? "" : healthPath)).get();
 
-        myAssertTrue(response.statusCode() < 500);
+        myAssertTrue("Health · HTTP status below 500 (was " + response.statusCode() + ")", response.statusCode() < 500);
     }
 }

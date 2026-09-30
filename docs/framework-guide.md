@@ -1,6 +1,6 @@
 # Automation Framework - the full guide
 
-> The short version is the [README](../README.md): tell Claude Code what to test and it does the rest. This guide
+> The short version is the [README](../README.md): tell the Agent Bot what to test and it does the rest. This guide
 > is for when you want to write or read the Java yourself, or understand what the agent builds.
 
 One framework for testing **any** app — **Web**, **Mobile (Android)** and **API** — with a full report made for you
@@ -121,7 +121,7 @@ suiteFiles/                ← web/ mob/ api/ hybrid/ suite XML files
 jenkins/                   ← Jenkins pages (Live Runner, Run Job) and the run report script
 bugcycle/                  ← run suite groups with retries, retest filed bugs, move them in the tracker
 testingActivity/           ← story.js: reads a user story and its tickets for the testing-activity skill
-.claude/skills, .claude/agents ← what Claude Code knows about this framework (see the end of this file)
+.claude/skills, .claude/agents ← what the Agent Bot knows about this framework (see the end of this file)
 report/                    ← created by each run
 ```
 
@@ -503,9 +503,9 @@ to the run.
 
 ---
 
-## Claude Code skills and agents
+## Agent Bot skills and agents
 
-`.claude/skills/` and `.claude/agents/` teach Claude Code how to work in this framework. They hold **no project
+`.claude/skills/` and `.claude/agents/` teach the Agent Bot how to work in this framework. They hold **no project
 data**: the places marked `<...>` are templates you fill in for your app.
 
 | Skill | What it is for |

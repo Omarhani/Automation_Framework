@@ -1,16 +1,17 @@
 # Automation Framework
 
-Test any app - **web**, **mobile (Android)** and **API** - by telling Claude Code what to test.
+Test any app - **web**, **mobile (Android)** and **API** - by telling the Agent Bot what to test.
 
 You say: *"test that a user can add an order and see it in the list"*.
 The **create-test-case** agent sets the data up through the API, runs the steps, checks the result with named
 assertions, cleans everything up again, and gives you the test case, the suite and the report.
 
-Built with Java 17 · Maven · TestNG · Selenium 4 · Appium 2 · RestAssured · ExtentReports · Claude Code.
+Built with Java 17 · Maven · TestNG · Selenium 4 · Appium 2 · RestAssured · ExtentReports, driven by an Agent Bot
+(any AI coding agent that reads the `.claude/` folder of the project).
 
 ## 1. Set up once
 
-1. Clone the repo and open the folder in Claude Code.
+1. Clone the repo and open the folder with your Agent Bot.
 2. Put your app in `data/testData.json`:
    ```json
    "ENVIRONMENTS": {
@@ -18,7 +19,7 @@ Built with Java 17 · Maven · TestNG · Selenium 4 · Appium 2 · RestAssured �
    },
    "UI": { "USERS": { "MAIN_USER": { "USERNAME": "admin", "PASSWORD": "..." } } }
    ```
-3. Say to Claude Code: *"fill in the app-testing skill for my app"* - it walks your app once and writes the app map
+3. Say to the Agent Bot: *"fill in the app-testing skill for my app"* - it walks your app once and writes the app map
    (pages, login, locators) into `.claude/skills/app-testing/SKILL.md`. Do the same for **api-catalog** (*"scan my
    app's API"*) so the agent knows which calls create and delete data.
 
@@ -63,7 +64,7 @@ every assertion with expected / actual.
 
 | Folder | Holds |
 |---|---|
-| `.claude/skills/` | what Claude Code knows: the framework, your app map, business rules, the API catalog, how to write locators, how to test a story, the bug cycle |
+| `.claude/skills/` | what the Agent Bot knows: the framework, your app map, business rules, the API catalog, how to write locators, how to test a story, the bug cycle |
 | `.claude/agents/` | `create-test-case`, `testing-activity`, `suite-bug-runner` |
 | `data/testData.json` | URLs, users, settings - no data lives in the code |
 | `src/main/java/pages`, `screens` | one class per web page / app screen: locators + actions |

@@ -94,6 +94,26 @@ Gotchas: <fields that appear after their dialog, filters that need a refresh cli
 - Test data Claude may create for its own checks: `<naming pattern, e.g. "AI Tester" / qa+ai<N>@example.com>` - delete
   it at the end.
 - Records that must never be touched: `<shared fixtures, admin accounts>`.
+- Set-up and clean-up of test data go through the API, not the UI (**automation-framework** rule); the calls are in
+  **api-catalog**. How to create / delete a throwaway user here: `<the project's create-by-API and delete-by-API suites or jobs>`.
+
+### Accounts and suite groups
+
+| Account / tenant | Admin (from `data/testData.json`) | Used for |
+|---|---|---|
+| `<main>` | `<ACCOUNTS / UI.USERS key>` | most suites; **no account-wide setting is changed here** |
+| `<one per group of suites that change account-wide settings>` | | `<the group>`; its base data is built by the suites' own set-up |
+
+Which switches need a higher role (super admin) and where they are: `<...>`.
+
+### Project rules of the road
+
+- Which design / theme / language the automation runs on, and how to check and set it before a walk: `<e.g. a localStorage flag>`.
+- Hours or conditions when an env is unreliable: `<e.g. "the test env is slow in the evening and emails arrive late - re-check odd results the next morning">`.
+- Devices: `<phone model / serial, USB vs Wi-Fi, emulator limits (e.g. the app blocks some actions on emulators)>`.
+- CI: `<where it runs, how it is reached, which jobs must not overlap>`.
+- What a walk shows about the API (a new call, a body, a refusal) is recorded in **api-catalog**; what it shows about
+  the business (a rule, a calculation) in **business-knowledge** - not here.
 
 ### Standard smoke test
 
@@ -183,3 +203,5 @@ PowerShell (which corrupts the PNG).
 - **xpath-locators** - writing a new locator, fixing a flaky one, multilingual rules, the Java `By` format.
 - **automation-framework** - the Java project: layout, lifecycle, helper API, test data, suites, running, reports.
 - **ai-test-run** - running a list of cases by hand with timing, retries, GIFs and an HTML report.
+- **business-knowledge** - the rules behind the screens; **api-catalog** - the calls behind them.
+- **testing-activity** / agent **create-test-case** - a whole user story, or one test case, end to end.

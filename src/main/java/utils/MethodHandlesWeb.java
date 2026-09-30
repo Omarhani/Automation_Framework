@@ -17,7 +17,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static org.testng.Assert.*;
 
 public class MethodHandlesWeb {
 
@@ -194,12 +193,6 @@ public class MethodHandlesWeb {
     private static void log(Object line) {
         if (test != null) {
             test.info(line.toString());
-        }
-    }
-
-    private static void logLabel(String text) {
-        if (test != null) {
-            test.info(MarkupHelper.createLabel(text, ExtentColor.BROWN));
         }
     }
 
@@ -765,13 +758,14 @@ public class MethodHandlesWeb {
     private static String caller() {
         return StackWalker.getInstance().walk(frames -> frames
                 .filter(f -> !f.getClassName().equals(MethodHandlesWeb.class.getName())
+                        && !f.getClassName().equals(ReportedAssertions.class.getName())
                         && !f.getClassName().startsWith("java.") && !f.getClassName().startsWith("jdk."))
                 .findFirst()
                 .map(f -> f.getClassName().substring(f.getClassName().lastIndexOf('.') + 1) + "." + f.getMethodName())
                 .orElse(""));
     }
 
-    private static void assertion(boolean passed, String detail) {
+    static void assertion(boolean passed, String detail) {
         tellListener(new Step(stepNumber, "assert", "", "", caller(), System.currentTimeMillis(), passed, detail));
     }
 
@@ -920,36 +914,47 @@ public class MethodHandlesWeb {
     }
 
 
+    // Assertions - web, mobile and API tests all use these (see utils.ReportedAssertions for what one assertion reports and logs).
+    // Give a name to say what is checked; without one the assertion is named after its line (OrdersTests:43).
+
     public static void myAssertEquals(Object actualResult, Object expectedResult) {
-        logLabel("------------------- Actual Result -------------------");
-        log(actualResult);
+        ReportedAssertions.equals(null, actualResult, expectedResult);
+    }
 
-        logLabel("------------------- Expected Result -------------------");
-        log(expectedResult);
+    /** {@code name}: what is checked, e.g. "Order details · total" - in the report, the log and the failure. */
+    public static void myAssertEquals(String name, Object actualResult, Object expectedResult) {
+        ReportedAssertions.equals(name, actualResult, expectedResult);
+    }
 
-        try {
-            assertEquals(actualResult, expectedResult);
-        } catch (AssertionError e) {
-            assertion(false, "expected \"" + expectedResult + "\" but got \"" + actualResult + "\"");
-            throw e;
-        }
-        assertion(true, "\"" + actualResult + "\"");
+    /** {@code actual} contains {@code expectedPart} - the report shows the whole actual text. */
+    public static void myAssertContains(String name, String actual, String expectedPart) {
+        ReportedAssertions.contains(name, actual, expectedPart);
     }
 
     public static void myAssertTrue(boolean condition) {
-        logLabel("------------------- Condition -------------------");
-        log(condition);
+        ReportedAssertions.isTrue(null, condition);
+    }
 
-        assertion(condition, "expected true, got " + condition);
-        assertTrue(condition);
+    /** {@code name}: what must be true, e.g. "Order left the list". */
+    public static void myAssertTrue(String name, boolean condition) {
+        ReportedAssertions.isTrue(name, condition);
     }
 
     public static void myAssertFalse(boolean condition) {
-        logLabel("------------------- Condition -------------------");
-        log(condition);
+        ReportedAssertions.isFalse(null, condition);
+    }
 
-        assertion(!condition, "expected false, got " + condition);
-        assertFalse(condition);
+    /** {@code name}: what must be false. */
+    public static void myAssertFalse(String name, boolean condition) {
+        ReportedAssertions.isFalse(name, condition);
+    }
+
+    /**
+     * Soft assertions: every assertion in {@code assertions} runs even when one fails; the test fails once at the end with all
+     * failed assertions listed, and the report gets one summary table of the group. See {@link ReportedAssertions#softly}.
+     */
+    public static void softly(String title, Runnable assertions) {
+        ReportedAssertions.softly(title, assertions);
     }
     ////////////////////////////////////////////////////////////////////////////////////////////
 

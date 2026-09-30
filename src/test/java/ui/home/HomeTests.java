@@ -13,6 +13,6 @@ public class HomeTests extends BaseTests {
 
     @Test(groups = "Web")
     public void verifyThatTheHomePageOpens() {
-        myAssertFalse(driver.getTitle() == null || driver.getTitle().isBlank());
+        myAssertFalse("Home page · title is empty", driver.getTitle() == null || driver.getTitle().isBlank());
     }
 }

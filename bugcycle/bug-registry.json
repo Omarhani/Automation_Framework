@@ -1,0 +1,4 @@
+{
+  "_comment": "Bugs filed from automation: what to run to retest each one. Add an entry when a bug is filed (suite-bug-cycle skill): {\"id\": <tracker id>, \"title\": \"...\", \"story\": <story id>, \"suite\": \"web/orders\", \"block\": \"<the <test> block name>\", \"assertion\": \"<assertion name without its #number>\", \"foundOn\": [\"Test\"], \"filed\": \"yyyy-mm-dd\"}.",
+  "bugs": []
+}

@@ -15,6 +15,9 @@ public class UI {
     /** Fixed codes the app accepts on its Test env (OTP, verification codes ...). */
     public Map<String, String> VERIFICATION_CODES = new LinkedHashMap<>();
 
+    /** How the login page is filled (locators), for tools that open the app logged in - see {@link Login}. */
+    public Login LOGIN = new Login();
+
     public User user(String name) {
         return Lookup.require(USERS, name, "UI.USERS");
     }

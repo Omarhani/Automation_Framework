@@ -19,7 +19,9 @@ Built with Java 17 · Maven · TestNG · Selenium 4 · Appium 2 · RestAssured �
    },
    "UI": { "USERS": { "MAIN_USER": { "USERNAME": "admin", "PASSWORD": "..." } } }
    ```
-3. Say to the Agent Bot: *"fill in the app-testing skill for my app"* - it walks your app once and writes the app map
+3. Fill `UI.LOGIN` in `data/testData.json` (the login page's path and the locators of the user name, password, submit
+   button and something shown only after login) so the agent can open your app logged in.
+4. Say to the Agent Bot: *"fill in the app-testing skill for my app"* - it walks your app once and writes the app map
    (pages, login, locators) into `.claude/skills/app-testing/SKILL.md`. Do the same for **api-catalog** (*"scan my
    app's API"*) so the agent knows which calls create and delete data.
 
@@ -38,14 +40,29 @@ Just say what to test. Examples:
 | *"run the smoke group and find bugs"* | the **suite-bug-runner** agent runs the group, retries failures to confirm real bugs, drafts them - you say yes before any bug is filed |
 | *"retest bug 1201"* | runs the suite behind the bug and tells you fixed / not fixed |
 
+How the agent works on a scenario:
+
+1. **You tell it the scenario** - e.g. *"a doctor creates a patient, uploads a file and shares it with another
+   doctor, who sees it"*.
+2. **It checks its knowledge** (`.claude/skills/business-knowledge/scenarios.md`). Known → it uses it.
+3. **Unknown → it learns it by itself**: picks the login (skill **login-mapping**), opens the app already logged in
+   (`mvn test -Dtestng=web/webOpenLoggedIn` - the framework types the password from `data/testData.json`, never the
+   agent), walks the scenario in that same browser (`node tools/browser.js`; two actors = two browsers), notes the
+   real texts and the API calls, deletes what the walk created, and saves the scenario to its knowledge.
+4. **It writes the test case and the suite XML** with set-up and clean-up **by API** (default) - or **through the UI**
+   when you ask (*"set up by UI"*), with an API safety net after a UI clean-up.
+
 Every test case the agent makes has the same shape:
 
 ```
-Set-up (API)      the user, the record, the setting the case needs - created by API, never by clicking
+Set-up (API)      the user, the record, the setting the case needs - by API (through the UI only when you ask)
 Steps             only the steps the case is about, on the web page, the phone or the API
 Expected          named assertions: "Orders list · status" expected "New", actual "New"
 Clean-up (API)    everything the run created is deleted again; nothing that existed before is touched
 ```
+
+After every action it tells you, in two tables, what was done and what blocks; every session ends with a short
+report (done · issues · shippable). Changes go through a branch and a pull request, never straight on main.
 
 You get back: the test case text, the data plan (which API call makes each precondition true), the suite XML, the
 run report as a table, and the list of files it changed.
@@ -64,7 +81,8 @@ every assertion with expected / actual.
 
 | Folder | Holds |
 |---|---|
-| `.claude/skills/` | what the Agent Bot knows: the framework, your app map, business rules, the API catalog, how to write locators, how to test a story, the bug cycle |
+| `.claude/skills/` | what the Agent Bot knows: the framework, your app map, business rules and known scenarios, the API catalog, which login to use, how to write locators, how to test a story, the bug cycle, the reports |
+| `tools/browser.js` | drives the browser `web/webOpenLoggedIn` left open, logged in |
 | `.claude/agents/` | `create-test-case`, `testing-activity`, `suite-bug-runner` |
 | `data/testData.json` | URLs, users, settings - no data lives in the code |
 | `src/main/java/pages`, `screens` | one class per web page / app screen: locators + actions |

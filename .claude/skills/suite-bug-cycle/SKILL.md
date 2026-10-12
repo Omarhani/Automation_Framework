@@ -99,3 +99,8 @@ someone moved meanwhile is left alone - and is read back. Output also in `<folde
   build's `testng-results.xml` with `jenkins/run-report.js`.
 - The retest finds a bug's assertion by **block name + assertion name**: renaming either means updating
   `bug-registry.json` in the same change.
+- The data a **filed** bug was found with is kept until the ticket is closed (listed in the kept-data file with the
+  bug id; the cleanup tool removes it once every bug of it is closed) - the only data a run leaves on purpose.
+- Bugs are filed in the short layouts of **automation-bug-report** (API vs UI / mobile, one root cause per ticket,
+  media only in the attachments).
+- After every action the two tables (done, blocks), and the session report at the end (skill **qa-reports**).

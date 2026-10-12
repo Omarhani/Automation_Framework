@@ -1,6 +1,6 @@
 ---
 name: automation-framework
-description: The project's Java test-automation framework - Maven + TestNG + Selenium + Appium + RestAssured + ExtentReports. Use when adding or changing a test, web page object, mobile screen, API client, suite XML or test data (data/testData.json), when running a suite (mvn test -Dtestng=...), when reading a run's report or Jenkins result, or when debugging framework-level problems (driver / Appium setup, groups, parameters, saved logins, reports, Live Runner). Covers the project layout, the BaseTests / BaseApi lifecycle, the MethodHandlesWeb / MethodHandlesMobile helper API, named assertions, the JSON data model, suite conventions, the set-up → test → clean-up-by-API shape of every test case, the delivery workflow (branch → run → PR → CI → report) and Jenkins wiring.
+description: The project's Java test-automation framework - Maven + TestNG + Selenium + Appium + RestAssured + ExtentReports. Use when adding or changing a test, web page object, mobile screen, API client, suite XML or test data (data/testData.json), when running a suite (mvn test -Dtestng=...), when reading a run's report or Jenkins result, or when debugging framework-level problems (driver / Appium setup, groups, parameters, saved logins, reports, Live Runner). Covers the project layout, the BaseTests / BaseApi lifecycle, the MethodHandlesWeb / MethodHandlesMobile helper API, named assertions, the JSON data model, suite conventions, the set-up → test → clean-up shape of every test case (API by default, UI when the tester asks; an unknown scenario is walked logged in first - web/webOpenLoggedIn + tools/browser.js, -DattachBrowser), the delivery workflow (branch → run → PR → CI → report) and Jenkins wiring.
 ---
 
 # Automation framework
@@ -23,7 +23,9 @@ Related skills and agents:
 |---|---|
 | write / fix a locator | skill **xpath-locators** |
 | the app under test: its map, login, quirks; walk a scenario by hand before automating it | skill **app-testing** |
-| the business rules behind the screens (what is expected, and why) | skill **business-knowledge** |
+| the business rules behind the screens (what is expected, and why), and the known scenarios (`scenarios.md`) | skill **business-knowledge** |
+| which env / account / user to log in as, and opening the app already logged in | skill **login-mapping** |
+| the tables after every action, the run report, the session report | skill **qa-reports** |
 | every API call a set-up or clean-up step can use, and whether it is verified | skill **api-catalog** |
 | one test case built as set-up → test → clean-up | agent **create-test-case** |
 | one user story end to end (analyse → walk → manual test → automate → PR → CI) | skill + agent **testing-activity** |
@@ -43,18 +45,23 @@ statuses) from what the app really shows, and verify every locator (1 match, non
 **xpath-locators**). Compile, run the suite, read the report. If something cannot be exercised (needs a password you
 don't have, writes to shared settings), say so and ask instead of shipping a guess.
 
-## Rule: a test case is set-up → test → clean-up, and set-up / clean-up go through the API
+## Rule: a test case is set-up → test → clean-up, and set-up / clean-up go through the API (UI when asked)
 
 Every test case (manual or automated) and every suite has three parts, in this order:
 
 | Part | How | What |
 |---|---|---|
-| **Set-up** | **API only** (clients in `apis/services`, as suite blocks) | everything the scenario needs but does not test: the user(s) it acts as or on, the admin session, master data (the entities the screen lists or links to), a record that must already exist, a setting in a known state |
+| **Set-up** | **API by default** (clients in `apis/services`, as suite blocks); **UI only when the tester asks** | everything the scenario needs but does not test: the user(s) it acts as or on, the admin session, master data (the entities the screen lists or links to), a record that must already exist, a setting in a known state |
 | **Test** | the channel under test (web, phone, or API when the rule has no screen) | only the steps the case is about, with named assertions |
-| **Clean-up** | **API only**, last block(s), reverse order of creation | every entity the run created (by the ids it kept in `RunContext`), and every setting put back to the value it had |
+| **Clean-up** | **API by default** (UI when asked, then the API safety net), last block(s), reverse order of creation | every entity the run created (by the ids it kept in `RunContext`), and every setting put back to the value it had |
 
-- The UI never does set-up or clean-up, unless that UI step **is** the thing under test (a "create from the web" case
-  tests the create form itself - its delete is still API).
+- **Know the scenario first**: before the first case of a scenario, look it up in **business-knowledge**
+  `scenarios.md`; an unknown one is walked logged in (**login-mapping** → `web/webOpenLoggedIn` → `tools/browser.js`
+  in the same session) and saved there before any case is written (agent **create-test-case**, step 0).
+- The UI does set-up or clean-up only when that UI step **is** the thing under test (a "create from the web" case
+  tests the create form itself - its delete is still API) **or the tester asks for a UI set-up / clean-up** ("set up
+  by UI") - then see *UI set-up and clean-up blocks* under *Suites and parameters*. API stays the default; mixed per
+  entity is fine.
 - Clean-up is its own `<test>` block, so it runs after a failed block, shows in the report with its API calls, and
   fails naming anything it could not delete. An `@AfterSuite` clean-up would hide all of that.
 - A set-up entity with no API client yet: look the call up in **api-catalog**, add it to the area's client
@@ -81,6 +88,11 @@ that existed before, on any env.
 - Probes and walkthroughs: uniquely named data, delete exactly that, then check through a list call that nothing with
   the tag is left.
 - Something the run did not create is in the way? **Stop and ask**, do not delete it.
+- The same holds for UI clean-up: a UI delete selects the row by the run's own unique name / id, never "the first row".
+- **Exception - a filed bug's data is kept**: the users and records a filed bug was found with stay until the ticket
+  is closed, so the developer can reproduce it. They are listed in a kept-data file (e.g.
+  `testingActivity/stories/<id>/kept-data.json`: item, env, bug id) and removed only by a cleanup tool that deletes an
+  item once all its bugs are closed (a small node script on the tracker's API - add one when the first bug needs it).
 
 ## Delivery workflow - every change, every time
 
@@ -140,6 +152,7 @@ jenkins/                         liveRunner.html, jobForm.html, job-form-button.
 Jenkinsfile                      pipeline: SUITE / ENV / BROWSER -> mvn test, publishes "<ENV> Report"
 bugcycle/                        suite groups with retries, bug registry, retest + tracker moves (skill suite-bug-cycle)
 testingActivity/story.js         reads a user story and its tickets into testingActivity/stories/<id>/ (skill testing-activity)
+tools/browser.js                 drives the browser web/webOpenLoggedIn left open (DevTools; skill login-mapping)
 .claude/skills, .claude/agents   the skills and agents (tracked; a knowledge update is a change like any other)
 
 src/main/java/
@@ -156,6 +169,7 @@ src/test/java/
   base/BaseTests.java            web + mobile lifecycle, driver start, page / screen wiring
   base/BaseApi.java              API lifecycle (report entry per test, RestAssured reset)
   ui/<feature>/*Tests.java       web tests          (ui/home/HomeTests = smoke example)
+  ui/tools/OpenLoggedInTests     web/webOpenLoggedIn: log in from UI.LOGIN + UI.USERS, leave the browser open
   mob/<feature>/*Tests.java      mobile tests       (mob/home/HomeTests = smoke example)
   apis/services/SpecFactory.java request spec every API client starts from
   apis/<area>/*Tests.java        API tests          (apis/health/HealthApiTests = smoke example)
@@ -189,6 +203,10 @@ mvn test -Dtestng=hybrid/hybridSmoke -DdataFile=data/other.json
 | `networkNoise=host\.a\|host\.b` | extra monitoring hosts (regex part) to drop from the network capture |
 | `recording=full` | browser recording every 300 ms as well as per step (debugging); default = one frame per step |
 | `live=on\|off`, `liveDir`, `liveUrl` | Live Runner feed; on by default when `BUILD_NUMBER` is set (Jenkins) |
+| `keepBrowserOpen=true` | the browser stays open after the run on a DevTools port (also the suite parameter `keepBrowserOpen`; `web/webOpenLoggedIn` sets it) |
+| `debugPort=9334` | that DevTools port for `keepBrowserOpen` (default: the first free one from 9333) |
+| `attachBrowser=127.0.0.1:9333` | no new browser: the suite drives the Chrome / Edge open on that DevTools address (e.g. the logged-in one); at the end only the driver session ends. Headed Chrome / Edge only |
+| `user`, `page` | `web/webOpenLoggedIn`: the `UI.USERS` key to log in as (default `MAIN_USER`), the path to open after the login |
 | `workDateSeed=yyyy-MM-dd` | first day for `workDate="auto"` |
 | `dateDir=<folder>` | shared folder for the rolling date files (several Jenkins agents, locked while written) |
 | `MAIL_USER`, `MAIL_APP_PASSWORD` | mailbox and its app password for `EmailReader` (also env vars; never in the repo) |
@@ -508,7 +526,8 @@ Rules for API clients - they are the API's page objects, and what set-up and cle
 ```
 
 - **Three parts, always:** `Set up - ... -` blocks (API) → the scenario's blocks → `Clean up - ... -` blocks (API). The
-  names make the run report read as the three parts.
+  names make the run report read as the three parts. A block that sets up or cleans up **through the UI** (only when
+  the tester asks) says so: `Set up (UI) - ... -` / `Clean up (UI) - ... -`.
 - One `<test>` block per step of the scenario; the block name is the report entry's title, so write it for a reader.
   **A block name is also a key**: the bug cycle finds a filed bug's block by it - renaming a block means updating
   `bugcycle/bug-registry.json`.
@@ -560,6 +579,42 @@ A set-up block may assert (a failed set-up is then a red block with the API answ
 fast). A set-up that needs an entity with no block yet gets **one generic, parameterised** `...ByApi` method backed by
 an API client - not a private helper inside a UI test.
 
+### UI set-up and clean-up blocks - only when the tester asks
+
+API is the default. When the tester asks for the set-up and / or clean-up through the UI (web or phone), the suite's
+first / last blocks are UI blocks instead. Keep this table current like the API one:
+
+| Need | UI block (class → method) | Parameters | Keeps (RunContext key) / removes | API safety net after it |
+|---|---|---|---|---|
+| _example: a patient created on the web_ | `ui.patients.PatientsTests` → `createPatient` | `name` (stamped `<name> <ddMMHHmmss>`) | `patientName`, `patientId` | - |
+| _example: that patient deleted on the web_ | `ui.patients.PatientsTests` → `deletePatient` | none (reads `patientName`) | removes `patientName` | `apis.patients.PatientsApiTests` → `deletePatientsOfThisRunByApi` |
+
+Rules:
+- Block names say the channel: `Set up (UI) - <what> -` / `Clean up (UI) - <what> -`, so the run report shows which
+  way the data was made.
+- A UI block is walked first like any test step; a UI block that does not exist yet is **one generic, parameterised
+  method** on the test class that owns that page (never a private helper in the case's class), and it stores what it
+  created - a unique stamped name and, when the page shows it, the id - in `RunContext`, so the clean-up finds it.
+- **Delete only what this run created** holds for the UI too: a UI delete selects the row by the run's own name / id
+  (search or filter first), never "the first row" and never by a fixed name.
+- After the UI clean-up, an **API safety-net block** runs (`delete...OfThisRunByApi`, acting only on the run's kept
+  ids / names), so a red UI step never leaves data behind. An entity with no UI delete is cleaned by API, and the data
+  plan says so.
+- Mixed is fine and common: the user by API, the one entity the tester wants by UI.
+
+```xml
+<test name="1. Set up - create the user by API -"> ... </test>
+<test name="2. Set up (UI) - create the patient on the web -">
+    <parameter name="name" value="tcShare"/>
+    <groups><run><include name="Web"/></run></groups>
+    <classes><class name="ui.patients.PatientsTests"><methods><include name="createPatient"/></methods></class></classes>
+</test>
+<test name="3. Doctor B sees the shared file"> ... </test>
+<test name="4. Clean up (UI) - delete the patient on the web -"> ... </test>
+<test name="5. Clean up - API safety net: patients of this run -"> ... </test>
+<test name="6. Clean up - delete the user by API -"> ... </test>
+```
+
 ### Every suite - keep this table current
 
 | Suite | Blocks | Own data | What it does | Group (`bugcycle/suite-groups.json`) | CI job |
@@ -568,6 +623,7 @@ an API client - not a private helper inside a UI test.
 | `web/webSmoke` | 1 | - | the app opens | web, smoke | |
 | `mob/mobSmoke` | 1 | - | the app is in front | mobile | |
 | `hybrid/hybridSmoke` | 3 | - | API + web in one report | hybrid | |
+| `web/webOpenLoggedIn` | 1 | - | tool, not a test: logs in (UI.LOGIN + `-Duser`) and leaves the browser open for `tools/browser.js` | - (not in a group) | |
 
 ### Work dates (apps with per-day data)
 
@@ -580,7 +636,8 @@ empty = `data/testDate.txt`, which moves **per block**. Use `auto` when several 
 ```
 ENVIRONMENTS  { "<Env>": { WEB_URL, API_BASE_URI, MOBILE_API_BASE_URI } }   the suite's server picks one
 ACCOUNTS      [ { CODE, ENV, ADMIN, PASSWORD } ]                              admins per account / tenant (ENV "" = every env)
-UI            { URLs {name: path}, USERS {name: User}, VERIFICATION_CODES {name: code} }
+UI            { URLs {name: path}, USERS {name: User}, VERIFICATION_CODES {name: code},
+                LOGIN { PATH, USERNAME_FIELD, PASSWORD_FIELD, SUBMIT, LOGGED_IN_CHECK } }   login page locators (XPath or CSS)
 API           { HEADERS {name: value}, USERS {name: User} }
 MOBILE        { DEVICE_NAME, WIFI_UDID, APP_PACKAGE, APP_ACTIVITY, APK_PATH, SESSION_FILE,
                 VERIFICATION_CODES {}, USERS {name: User} }
@@ -628,6 +685,20 @@ app's own code runs (no race with the app's start-up).
 project has an API login client, add a block that logs in by API and writes the session the way the app stores it
 (the keys listed in **app-testing** → Login flow), then `saveSession()`. No login page, no one-time code, no captcha -
 and no collision when several CI builds log in as the same admin at once.
+
+**Open the app logged in and keep it open** (for walks, checks and learning a scenario - not a test):
+
+```bash
+mvn test -Dtestng=web/webOpenLoggedIn -DserverType=Test [-Duser=<UI.USERS key>] [-Dpage=/orders] [-DdebugPort=9334]
+MSYS_NO_PATHCONV=1 node tools/browser.js url | goto /path | text [sel] | click <sel> | type <sel> <text> | key Enter | wait <sel> | shot | close
+mvn test -Dtestng=<suite> -DbrowserType=Chrome -DattachBrowser=127.0.0.1:9333    # a suite inside that same browser
+```
+
+`ui.tools.OpenLoggedInTests` fills the login page from `UI.LOGIN` with the user's row (default `MAIN_USER`) - the code
+types the password, Claude never does - checks `LOGGED_IN_CHECK`, opens `-Dpage`, writes `target/open-browser.json`
+(port, env, user, url - no secret) and leaves the browser open (`keepBrowserOpen`: DevTools port from 9333, driver
+stopped, browser detached). An empty `UI.LOGIN` field or password stops the run naming the key to fill. Two actors =
+two runs on two ports (`--port=` on browser.js). Which user to pick: skill **login-mapping**.
 
 **Phone** (`BaseTests.loginOnPhone`, needs `MOBILE.SESSION_FILE` = the app's login file in its data folder, e.g.
 `shared_prefs/<name>.xml`, and a **debuggable** build):
@@ -729,3 +800,40 @@ EmailReport.logLastEmail();                         // the email, rendered, in t
 11. **Gson drops unknown keys** in fixed sections - add the POJO field.
 12. **Encoding:** non-ASCII text needs the UTF-8 `argLine` already in `pom.xml`; keep Java sources UTF-8.
 13. **Rolling date files** are gitignored; a wiped workspace restarts them at their seed (use `-DdateDir` on CI).
+14. **`-DattachBrowser` + headless** is refused: attach drives a headed Chrome / Edge already open on that port.
+15. **Git Bash rewrites `/path` arguments** into Windows paths for node: `MSYS_NO_PATHCONV=1 node tools/browser.js ...`
+    (never needed for mvn).
+
+## Report after every action - in tables
+
+After **any** action or step - not only at the end of a session - tell the tester, in tables, what was done and what
+blocks (format and the session report: skill **qa-reports**):
+
+| What was done | Result | Evidence / link |
+|---|---|---|
+| the action in plain words | pass / fail / done / refused, with numbers | screenshot, ticket, file |
+
+| Block or issue | Impact | Needed to go on | Photo | Action | Status |
+|---|---|---|---|---|---|
+| what stopped or failed (a refused permission, a missing setting, a sign-in, a tool that failed) | what cannot be done because of it | who or what clears it | a link to the screenshot or file that shows it, or - | one line: who does what next | Open / Blocked / Closed |
+
+Never skip the block table when something was refused, blocked, failed or skipped (say "none" when there is none);
+one line per row; a skipped step is "not done", never "done"; keep going with what is not blocked. Every session that
+did work ends with the session report (three tables: what I did, issues, shippable).
+
+## Never work on main - branch first
+
+Before the FIRST edit of any task (also after a merge, when the checkout has gone back to main): `git branch
+--show-current`; on main (or a branch that is not this task's) → `git fetch` and `git switch -c <task-branch>` from
+the updated main, then work (uncommitted files move with the switch). **Everything** - code, suite, skill, note, a
+generated report in the repo - reaches main only through a branch → push → pull request → merge; never a commit on
+main, not even a one-line fix. After the merge go back to main only to pull, and start the next piece of work on a
+new branch. A shared checkout: check the branch before and after every run.
+
+## Passwords in the app - a suite types them, never a person
+
+A case that needs a password typed in the app (change password, log in with the new one, wrong current password) is
+run by the framework's own suite, not by hand and never by asking the tester to type it: a method on the area's test
+class (or a new class + suite XML) that takes the passwords from `data/testData.json` (`PASSWORD`, `NEW_PASSWORD`,
+`WRONG_PASSWORD` of the user's row), creates its own user by API, and deletes it at the end. Claude never types,
+prints or asks for a password; the same holds for logging in to walk a scenario (`web/webOpenLoggedIn` types it).

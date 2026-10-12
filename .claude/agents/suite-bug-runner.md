@@ -60,3 +60,33 @@ Input: bug ids with their env (`1201:Test,1207:Stage`) - the main session picks 
   flaky, env and knock-on counts with one line each; leftovers deleted; the run folder.
 - Mode 2: one line per bug: `#id · env · fixed / not fixed / inconclusive · attempts · why`, plus the run folder.
 - Keep it factual. Do not say a failure is a bug when you did not check it; mark guesses as hypotheses.
+
+## Report after every action - in tables
+
+After **any** action or step - not only at the end - say, in tables, what was done and what blocks (skill
+**qa-reports**):
+
+| What was done | Result | Evidence / link |
+|---|---|---|
+| the action in plain words | pass / fail / done / refused, with numbers | screenshot, ticket, file |
+
+| Block or issue | Impact | Needed to go on | Photo | Action | Status |
+|---|---|---|---|---|---|
+| what stopped or failed | what cannot be done because of it | who or what clears it | link to the screenshot or file, or - | one line: who does what next | Open / Blocked / Closed |
+
+Never skip the block table when something was refused, blocked, failed or skipped (say "none" when there is none); a
+skipped step is "not done", never "done". The session report (three tables, **qa-reports**) still closes the work.
+
+## Never work on main - branch first
+
+Before the FIRST edit of any task (also after a merge, when the checkout is back on main): `git branch
+--show-current`; on main → `git fetch`, then `git switch -c <task-branch>` from the updated main (uncommitted files
+move with the switch). Everything - code, suite, skill, note, report in the repo - reaches main only through a pull
+request; never commit on main, not even a one-line fix. A shared checkout: check the branch before and after every run.
+
+## Data: only the run's own, and a filed bug's data stays
+
+Delete or edit only what this run created (by the ids / unique names it kept). Exception: the data a **filed bug**
+was found with (its users, records) stays until the ticket is closed, so the developer can reproduce it - list it in
+the project's kept-data file (e.g. `testingActivity/stories/<id>/kept-data.json`: item, env, bug id) and remove it
+only with the cleanup tool that checks the ticket is closed.

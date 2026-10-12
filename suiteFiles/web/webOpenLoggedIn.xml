@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!-- Opens the web app logged in and leaves the browser open on a DevTools port, so the same session can be driven
+     afterwards with tools/browser.js (walk a scenario, check a page, take a screenshot):
+       mvn test -Dtestng=web/webOpenLoggedIn -DserverType=Test
+       mvn test -Dtestng=web/webOpenLoggedIn -DserverType=Test -Duser=<UI.USERS key> -Dpage=/<path>
+       node tools/browser.js url        (Git Bash: MSYS_NO_PATHCONV=1 node tools/browser.js ..., never for mvn)
+     The login page is filled from data/testData.json UI.LOGIN (PATH, USERNAME_FIELD, PASSWORD_FIELD, SUBMIT,
+     LOGGED_IN_CHECK) with the user's own row in UI.USERS (default MAIN_USER) - the code types the password.
+     -DdebugPort=9334 picks the port (default: the first free one from 9333); a second actor = a second run on
+     another port, then browser.js with its port option. Headed Chrome / Edge only. Close it: node tools/browser.js close
+     A later suite can run inside that browser: -DattachBrowser=127.0.0.1:<port>. -->
+<suite name="Open the app logged in">
+    <parameter name="server" value="${serverType}"/>
+    <parameter name="browser" value="${browserType}"/>
+    <parameter name="keepBrowserOpen" value="true"/>
+    <parameter name="debugPort" value="${debugPort}"/>
+    <!-- a key of UI.USERS; empty = MAIN_USER -->
+    <parameter name="user" value="${user}"/>
+    <parameter name="page" value="${page}"/>
+
+    <test name="Open the app logged in">
+        <groups><run><include name="Web"/></run></groups>
+        <classes>
+            <class name="ui.tools.OpenLoggedInTests"/>
+        </classes>
+    </test>
+</suite>

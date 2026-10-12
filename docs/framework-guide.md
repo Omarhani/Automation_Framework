@@ -426,6 +426,19 @@ In IntelliJ: right-click a suite XML → **Run**.
 | `-DdataFile=` | use another data file | `data/testData.json` |
 | `-Dudid=` | force a phone (serial or `ip:port`) | USB phone first |
 | `-Dnetwork=off` | don't record network calls in the Timeline | on |
+| `-DkeepBrowserOpen=true` / `-DdebugPort=` | leave the browser open after the run on a DevTools port | off / first free from 9333 |
+| `-DattachBrowser=127.0.0.1:9333` | run the suite inside a browser that is already open (headed Chrome / Edge) | a new browser |
+
+**Open the app logged in** (to look around, or for the Agent Bot to learn a scenario): fill `UI.LOGIN` in
+`data/testData.json` once (login page path + the locators of the user name field, password field, submit button and
+an element shown only after login), then
+
+```bash
+mvn test -Dtestng=web/webOpenLoggedIn -DserverType=Test -Duser=MAIN_USER -Dpage=/orders
+node tools/browser.js text            # goto /path | click <sel> | type <sel> <text> | shot | close
+```
+
+The framework types the password from the user's row; the browser stays open and `tools/browser.js` drives it.
 
 ---
 
@@ -510,9 +523,11 @@ data**: the places marked `<...>` are templates you fill in for your app.
 
 | Skill | What it is for |
 |---|---|
-| `automation-framework` | the framework itself: layout, lifecycle, helpers, named assertions, suites, data, reports, CI - and the house rules: every test case is **set-up by API → test → clean-up by API**, delete only what the run created, branch → run → pull request → CI → report |
+| `automation-framework` | the framework itself: layout, lifecycle, helpers, named assertions, suites, data, reports, CI - and the house rules: every test case is **set-up → test → clean-up, by API** (through the UI only when you ask, with an API safety net), delete only what the run created, branch → run → pull request → CI → report |
 | `app-testing` | *template*: your app's map - environments, login, pages, locators, quirks, accounts |
-| `business-knowledge` | *template*: your app's business rules per module, plus a log of the stories handled |
+| `business-knowledge` | *template*: your app's business rules per module, the **known scenarios** (`scenarios.md`, read first) and a log of the stories handled |
+| `login-mapping` | *template*: which env / account / user a task uses (picked automatically), and opening the app logged in (`web/webOpenLoggedIn` + `tools/browser.js`) |
+| `qa-reports` | the two tables after every action, the run report, the session report at the end, manager and developer reports |
 | `api-catalog` | *template*: every API call set-up and clean-up can use, marked verified / seen / read from the app / unknown; `tools/web-api-scan.js` builds the list from a web app's own script |
 | `xpath-locators` | writing and verifying stable locators |
 | `ai-test-run` | running test cases by hand in the browser with a timed report |
@@ -522,7 +537,7 @@ data**: the places marked `<...>` are templates you fill in for your app.
 
 | Agent | What it does |
 |---|---|
-| `create-test-case` | builds one test case as set-up → test → clean-up, verifying any API call it needs first |
+| `create-test-case` | builds one test case as set-up → test → clean-up, verifying any API call it needs first. You tell it the scenario → it checks the known scenarios → an unknown one it learns by opening the app logged in and walking it → it writes the case and the suite XML with API (or, when you ask, UI) set-up and clean-up |
 | `testing-activity` | runs the testing-activity procedure for one story |
 | `suite-bug-runner` | runs a suite group (or retests bugs) in the background and returns the report |
 

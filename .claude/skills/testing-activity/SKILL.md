@@ -1,6 +1,6 @@
 ---
 name: testing-activity
-description: The Testing Activity for one user story, end to end - read the story and every ticket around it in the tracker, learn the business, walk it on the test environment, write the test cases (set-up by API → steps → expected → clean-up by API), test it by hand, then plan, design, implement and run the automation (added to an existing suite when it fits, else a new suite on its own data), push, open and merge the pull request, and run it in CI; the knowledge skills are updated after every phase. Use when the user gives a story number - "testing activity for 1234", "test story X", "automate story X". The agent testing-activity runs the same procedure.
+description: The Testing Activity for one user story, end to end - read the story and every ticket around it in the tracker, learn the business (known scenarios first; an unknown one is walked logged in and saved), walk it on the test environment, write the test cases (set-up by API, or UI when asked → steps → expected → clean-up), test it by hand, then plan, design, implement and run the automation (added to an existing suite when it fits, else a new suite on its own data), push, open and merge the pull request, and run it in CI; the knowledge skills are updated after every phase. Use when the user gives a story number - "testing activity for 1234", "test story X", "automate story X". The agent testing-activity runs the same procedure.
 ---
 
 # Testing Activity - one user story, end to end
@@ -12,7 +12,9 @@ Skills this procedure leans on - read them at the phase that needs them, not all
 
 | Skill | For |
 |---|---|
-| **business-knowledge** | business rules per module - read in phase 1, update after phases 1, 2, 3 and 7 |
+| **business-knowledge** | business rules per module and `scenarios.md` (known scenarios, read FIRST) - read in phase 1, update after phases 1, 2, 3 and 7 |
+| **login-mapping** | which env / account / user to log in as (picked automatically), and how to open the app already logged in (phase 2 and every task in the app) |
+| **qa-reports** | the tables after every action, the run report, the session report at the end |
 | **app-testing** | app map, mapped pages, locators, quirks - update after phases 2 and 3 |
 | **api-catalog** | every call a set-up / clean-up step can use, and whether it is verified (phases 2-6); update it whenever a walk or a run shows a new call |
 | **ai-test-run** | how to run and report the manual test cases (phase 3) |
@@ -24,7 +26,8 @@ Every phase leaves a file in `testingActivity/stories/<id>/` (committed with the
 gitignored). Tell the user in one line when each phase starts and ends (and the branch).
 
 **Test cases are created the `create-test-case` way** (agent `.claude/agents/create-test-case.md`): each case =
-**Set-up (API) → Steps → Expected → Clean-up (API)**, with a data plan that names the call behind every precondition.
+**Set-up (API; UI only when the tester asks) → Steps → Expected → Clean-up (API; UI only when asked, then the API
+safety net)**, with a data plan that names the call (or UI block) behind every precondition.
 Phases 3-6 follow that agent's steps; in the main session do them yourself, or hand one scenario's cases to the agent
 (it returns the cases, the data plan, the calls it verified and a green run) and carry on with phase 7.
 
@@ -53,8 +56,16 @@ go on.
 
 ## Phase 2 - Learn it on the test env
 
-- The browser on the test env (the user is signed in there; never type a password - on the login page, ask them to
-  sign in). Check first that you are looking at the design / language / role the automation runs on (**app-testing**).
+- **Known scenario first**: look the story's scenario(s) up in **business-knowledge** `scenarios.md`. Known → walk
+  only what the story changes. Unknown → the walk below learns it, and its row goes into `scenarios.md` **before**
+  phase 3 - do not ask the tester how it works.
+- **Open it logged in, without asking**: pick env / account / user from **login-mapping** *Pick automatically* (say
+  in one line what you picked), then `mvn test -Dtestng=web/webOpenLoggedIn -DserverType=<env> [-Duser=<key>]` and
+  drive that same session with `node tools/browser.js` until the scenario ends (two actors = two browsers on two
+  DevTools ports). The framework types the password; Claude never does. Close it and delete the walk's own data at
+  the end (create-test-case step 0).
+- Fallback, when the tester is already signed in in a browser you can use: that browser (never type a password - on
+  the login page, ask them to sign in). Check first that you are looking at the design / language / role the automation runs on (**app-testing**).
   Mobile: the device with `adb` (framework skill, *walk it first*).
 - If the test env is known to be unreliable at certain hours (**app-testing** → quirks), say so when walking then and
   re-check anything odd later.
@@ -70,9 +81,10 @@ go on.
 
 1. Test cases in `test-cases.md`: `TC-01..` in the create-test-case block format - title, criterion / rule covered,
    priority, type (positive / negative / boundary / permission / language / empty state / setting on-off), channel,
-   **Set-up (API)** (one line per precondition with the block or endpoint that makes it true - data by tag, never a
-   password), **Steps**, **Expected** (real values from phase 2 when the story does not fix them, each a named
-   assertion), **Clean-up (API)** (reverse order, only what the case created, settings put back), and **automate? yes
+   **Set-up (API)** - or **Set-up (UI)** when the tester asked - (one line per precondition with the block or
+   endpoint that makes it true - data by tag, never a password), **Steps**, **Expected** (real values from phase 2
+   when the story does not fix them, each a named assertion), **Clean-up (API)** - or **Clean-up (UI)** + the API
+   safety net - (reverse order, only what the case created, settings put back), and **automate? yes
    / no + why** (no = one-off visual check, needs a real device feature, needs a password, costs more than it covers).
    Before the cases: the **data plan table** (entity → state → set-up call → id kept → clean-up call → catalog status
    ✅ / 🔎 / ❌). A 🔎 or ❌ call is wrapped and verified with own data first - that is part of this phase, not of
@@ -89,8 +101,8 @@ go on.
 
 Write `automation-plan.md` - the decisions below, each with its reason:
 - **Channel** and **placement**: the existing suite to extend (which blocks, inserted where) or the new suite's path.
-- **Blocks** in order, in three groups - `Set up - ... -` (API), the scenario's blocks, `Clean up - ... -` (API,
-  reverse order) - one line each: test class + method (existing or new), parameters, what it asserts (named
+- **Blocks** in order, in three groups - `Set up - ... -` (API; `Set up (UI) - ... -` when asked), the scenario's
+  blocks, `Clean up - ... -` (API; `Clean up (UI) - ... -` + the API safety net when asked; reverse order) - one line each: test class + method (existing or new), parameters, what it asserts (named
   assertions, a soft group for several fields).
 - New / changed code: page objects, screens, API clients, generic test methods (parameterised on the class that owns
   the area - never a class per scenario, never two methods that differ only by data).
@@ -109,8 +121,12 @@ Write `automation-plan.md` - the decisions below, each with its reason:
 | an action on one side and its effect on the other (user requests on the phone → admin approves on the web) | hybrid | `suiteFiles/hybrid` (generic web / mob methods) |
 | a rule or calculation with no screen of its own | api (plus the web / mob check when a screen shows it) | `suiteFiles/api`, `apis.<area>` |
 
-Set-up and clean-up - everything that is not what the story tests - go **through the API**, whatever the channel; the
-recipes are in **api-catalog**. A UI step is never used as set-up or clean-up. A fresh account of a suite group gets
+Set-up and clean-up - everything that is not what the story tests - go **through the API** by default, whatever the
+channel; the recipes are in **api-catalog**. **Through the UI only when the tester asks** ("set up by UI"): then the
+blocks are named `Set up (UI) - ... -` / `Clean up (UI) - ... -`, each is one generic parameterised method on the test
+class that owns the page, stores what it created (unique stamped name / id), deletes only that, and an API
+safety-net block runs after the UI clean-up (framework skill, *UI set-up and clean-up blocks*). Mixed per entity is
+fine. A fresh account of a suite group gets
 its base data built by the suite's set-up blocks and removed by its clean-up blocks.
 
 **Placement - extend first, new suite only when it does not fit.** Find the suites on the same area (grep the area's
@@ -182,6 +198,13 @@ The framework's *Delivery workflow*:
 - Test env only; never production; other envs only on request.
 - Never delete or edit data the run did not create; never the protected accounts; ask before flipping a setting in a
   walk.
-- Never type a password or read one out; test users' passwords come from the data file.
+- Never type a password or read one out; test users' passwords come from the data file. A case that needs a password
+  typed in the app (change password, log in with the new one) is run by a suite that reads it from the data file -
+  never by hand, never by asking the tester to type it.
 - Don't stop between phases to ask "shall I go on?" - stop only for a question from phase 1, a sign-in, a refused
   step, or a destructive surprise.
+- **Bugs are short** (skill **automation-bug-report**, *Short layouts*): one root cause per ticket, the API layout or
+  the UI / mobile layout, media only in the attachments. The data a filed bug was found with is **kept until the
+  ticket is closed** (kept-data list + cleanup tool) - the only exception to "delete what the run created".
+- After every action: the two tables (done, blocks); at the end: the session report (skill **qa-reports**).
+- Never work on main: a new branch from the updated main before the first edit; everything through a pull request.

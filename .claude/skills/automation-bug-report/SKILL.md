@@ -27,7 +27,30 @@ Right after the run report table (`node jenkins/run-report.js ...`, see **automa
 4. Tell the user in one short list: `<suite> block <n> - <one-line bug> (<layer>) - story #<id> - draft ready /
    duplicate of #<id>`. Then **stop and wait for "yes" per bug**.
 
-## 2. The bug structure
+## 2. Short layouts - API bug vs UI / mobile bug
+
+Every bug is short, with real tables, and its media only in the tracker's **attachments** (nothing embedded in the
+description). Pick the layout by the layer that is wrong:
+
+- **One root cause per ticket, one row per input that shows it.** A different rule or a different fix = another
+  ticket, linked Related both ways. Two symptoms with one fix = one ticket with two rows.
+- **API layout**: Summary · Call (method, endpoint, layer, status) · Steps · **Expected and actual result** (table:
+  Case / Field / Expected / Actual) · Request (URI, headers, a body table Field / Type / Example value / Meaning - real
+  example values from the test env, the token a placeholder) · Test data · Retest. Attachment: the request / answer
+  json (an API bug has no screen, so no video).
+- **UI / mobile layout**: Summary · Precondition (one line, only if needed) · Steps (3 to 5, one action each) ·
+  **Expected and actual result** (one row each) · Test data (short key / value: env, account, users by tag and role,
+  ids, dates - never a password) · Retest. Attachments: a full-window screenshot with a red box on the element, a GIF
+  of the steps (the report's step recording), and a short video when the problem moves.
+- Title: `[Area - Layer] short sentence` (e.g. `[Orders - API] details call returns no total for an order with items`).
+- **Keep the bug's data until the ticket is closed**: the users and records it was found with stay, listed in the
+  project's kept-data file (item, env, bug id); a cleanup tool deletes an item only once all its bugs are closed.
+  Everything else of the run is still deleted as usual.
+
+The long structure below still lists what a bug can need (evidence, analysis, found-by-automation, the AUTOMATION:
+line); the layouts above decide how short it is and how it is shown.
+
+## 3. The bug structure (full)
 
 **Title**: `[Feature] What is wrong: where / under which condition` - one line, searchable, never "not working".
 e.g. `[Order details] Total shows "-": the details call returns an empty total although the order has items`
@@ -55,7 +78,7 @@ System info: environments + URLs, date, frequency, layer.
 Drafts are written to a file first (`bugs/<short-slug>.md` next to the story or the run), so the user can read one
 before saying yes.
 
-## 3. Tracker fields
+## 4. Tracker fields
 
 Fill this table once per project from how the team's existing bugs look (open three recent ones and copy their
 conventions), and keep `bugcycle/config.json` → `tracker` in step:
@@ -72,7 +95,7 @@ conventions), and keep `bugcycle/config.json` → `tracker` in step:
 | Tags / labels | `tracker.tags` + the feature |
 | Links | parent = the user story; related bugs; the screenshot as an attachment |
 
-## 4. Access and safety
+## 5. Access and safety
 
 - Use the credential the machine already has for the tracker (for Azure DevOps: the one `git credential fill` returns;
   `bugcycle/ado.js`). Never print it, never ask for a token in chat. Fallback: the user's signed-in tracker session in
@@ -84,7 +107,7 @@ conventions), and keep `bugcycle/config.json` → `tracker` in step:
   any retry, never create twice.
 - Never create, edit, close or comment on work items the user did not confirm. Never change existing bugs or stories.
 
-## 5. Worked examples
+## 6. Worked examples
 
 Keep one or two of the project's own filed bugs here as the model (title, the text, its tracker id and link), and the
 drafts in `bug-drafts/`.

@@ -17,6 +17,13 @@
   "UI": {
     "URLs": {},
     "VERIFICATION_CODES": {},
+    "LOGIN": {
+      "PATH": "",
+      "USERNAME_FIELD": "",
+      "PASSWORD_FIELD": "",
+      "SUBMIT": "",
+      "LOGGED_IN_CHECK": ""
+    },
     "USERS": {
       "MAIN_USER": {
         "EMAIL": "",

@@ -42,8 +42,10 @@ report.
 
 `<steps: e.g. tenant / account code -> Next -> username + password -> OTP?>`
 
-- Claude **never types passwords**. If the app is on its login page, stop and ask the user to sign in (their browser
-  session is then reused).
+- Claude **never types passwords**. To work in the app logged in, let the framework log in: fill `UI.LOGIN` (the
+  login page's path and locators) in `data/testData.json` once, then `mvn test -Dtestng=web/webOpenLoggedIn` and
+  drive that browser with `node tools/browser.js` (skill **login-mapping** picks the user). In a browser the user
+  owns that is on its login page: stop and ask them to sign in (their session is then reused).
 - Where the app keeps its session: `<localStorage keys / cookies>` - this is what `UtilsTests.saveSession()` replays.
 - How to check which user / role is signed in without exposing tokens: `<e.g. read localStorage.USER and return only UserName / role flags>`.
 

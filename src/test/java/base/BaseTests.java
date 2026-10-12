@@ -261,21 +261,75 @@ public class BaseTests {
         options.setExperimentalOption("perfLoggingPrefs", Map.of("enableNetwork", true, "enablePage", false));
     }
 
+    /**
+     * {@code keepBrowserOpen="true"} (suite parameter, or {@code -DkeepBrowserOpen=true}): the browser is not closed at
+     * the end of the class and stays open after the run, with its DevTools port on {@code 127.0.0.1:<debugPort>}
+     * ({@code -DdebugPort} / suite parameter; else the first free one from 9333 - 9222 is often taken by another
+     * Chrome). A script can then drive the logged-in session ({@code tools/browser.js}, which reads the port from
+     * {@code target/open-browser.json}). Used by {@code web/webOpenLoggedIn}; every other suite closes its browser.
+     */
+    protected boolean keepBrowserOpen;
+    protected int debugPort;
+
+    /**
+     * {@code -DattachBrowser=127.0.0.1:9333}: no new browser - the suite drives the Chrome / Edge already open on that
+     * DevTools address (e.g. the one {@code web/webOpenLoggedIn} left open, so a suite runs in that logged-in session).
+     * At the end only the driver session is ended; the browser stays open.
+     */
+    protected static String attachBrowser() {
+        String address = System.getProperty("attachBrowser", "").trim();
+        return address.isEmpty() || address.startsWith("${") ? null : address;
+    }
+
+    private static boolean portFree(int port) {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(port, 1, java.net.InetAddress.getLoopbackAddress())) {
+            return true;
+        } catch (java.io.IOException taken) {
+            return false;
+        }
+    }
+
+    /** Attach to an open browser, or open one that outlives the run on a DevTools port (see the two fields above). */
+    private void openToAttach(org.openqa.selenium.chromium.ChromiumOptions<?> options) {
+        if (attachBrowser() != null) {
+            options.setExperimentalOption("debuggerAddress", attachBrowser());
+            return;
+        }
+        if (keepBrowserOpen) {
+            if (debugPort == 0) {
+                debugPort = 9333;
+                while (!portFree(debugPort)) {
+                    debugPort++;
+                }
+            } else if (!portFree(debugPort)) {
+                throw new IllegalStateException("DevTools port " + debugPort + " is taken - give another -DdebugPort");
+            }
+            options.addArguments("--remote-debugging-port=" + debugPort);
+            options.setExperimentalOption("detach", true);
+        }
+    }
+
     @Parameters({"browser"})
     public void setUpBrowserWeb(String browser) {
         currentBrowser = browser;
         if (browser.equalsIgnoreCase("Chrome") || browser.equalsIgnoreCase("${browserType}")) {
             chromeOptions = new ChromeOptions();
-            chromeOptions.addArguments(
-                    "--window-size=1920,1080"
-            );
+            if (attachBrowser() == null) {
+                chromeOptions.addArguments(
+                        "--window-size=1920,1080"
+                );
+            }
+            openToAttach(chromeOptions);
             logNetworkAndConsole(chromeOptions, ChromeOptions.LOGGING_PREFS);
             driver = startWithCachedDriver("chromedriver", "webdriver.chrome.driver", () -> new ChromeDriver(chromeOptions));
         } else if (browser.equalsIgnoreCase("Edge")) {
             edgeOptions = new EdgeOptions();
-            edgeOptions.addArguments(
-                    "--window-size=1920,1080"
-            );
+            if (attachBrowser() == null) {
+                edgeOptions.addArguments(
+                        "--window-size=1920,1080"
+                );
+            }
+            openToAttach(edgeOptions);
             logNetworkAndConsole(edgeOptions, EdgeOptions.LOGGING_PREFS);
             driver = startWithCachedDriver("msedgedriver", "webdriver.edge.driver", () -> new EdgeDriver(edgeOptions));
         } else if (browser.equalsIgnoreCase("headlessChrome")) {
@@ -313,10 +367,21 @@ public class BaseTests {
 
     @Parameters("browser")
     @BeforeClass(groups = "Web")
-    public void setUpWeb(@Optional("Chrome") String browser) {
+    public void setUpWeb(@Optional("Chrome") String browser, ITestContext context) {
         utilsTests = new UtilsTests(driver);
+        String keep = context.getCurrentXmlTest().getParameter("keepBrowserOpen");
+        keepBrowserOpen = "true".equalsIgnoreCase(keep) || Boolean.getBoolean("keepBrowserOpen");
+        String port = System.getProperty("debugPort", context.getCurrentXmlTest().getParameter("debugPort"));
+        if (port != null && port.trim().matches("\\d+")) {
+            debugPort = Integer.parseInt(port.trim());
+        }
+        if (attachBrowser() != null && browser.toLowerCase().startsWith("headless")) {
+            throw new IllegalArgumentException("-DattachBrowser drives an open Chrome / Edge - use -DbrowserType=Chrome or Edge");
+        }
         setUpBrowserWeb(browser);
-        driver.manage().window().setSize(new Dimension(1920, 1080));
+        if (attachBrowser() == null) {
+            driver.manage().window().setSize(new Dimension(1920, 1080));
+        }
         driver.manage().timeouts().pageLoadTimeout(Duration.ofSeconds(30));
         // your project's page objects
         homePage = new HomePage(driver);
@@ -342,7 +407,17 @@ public class BaseTests {
 
     @AfterClass(groups = "Web")
     public void tearDownWeb() {
+        if (keepBrowserOpen && attachBrowser() == null) {
+            // the browser is detached, so its driver is no longer needed: stop this run's own driver process (a child
+            // of this JVM) rather than leave one behind per run - the browser survives
+            ProcessHandle.current().children()
+                    .filter(p -> p.info().command().map(c -> c.toLowerCase().matches(".*(chromedriver|msedgedriver)(\\.exe)?$")).orElse(false))
+                    .forEach(p -> System.out.println("Driver " + p.pid() + " stopped: " + p.destroyForcibly()));
+            System.out.println("Browser left open - DevTools on 127.0.0.1:" + debugPort + " (node tools/browser.js url)");
+            return;
+        }
         if (driver != null) {
+            // attached (-DattachBrowser): quit ends the driver session only - a browser the driver did not start stays open
             driver.quit();
         }
     }
